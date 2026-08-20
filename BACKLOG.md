@@ -84,4 +84,22 @@ interface, so it's a drop-in replacement, not a redesign.
 
 ---
 
+## Google Drive connector not yet available
+
+**What:** Wanted a live-connected Google Drive so Jared could drop TMs in
+and have them flow into ingestion automatically.
+
+**Why deferred:** Checked the connector directory (Aug 2026) — no Google
+Drive connector currently available to link into this chat/project. Workflow
+for now: shared Drive folder as the human hand-off point (Jared/Dave
+organize files there), then manual upload into the ingestion pipeline when
+ready to process a batch.
+
+**Path to fixing it:** Check back periodically for a connector to appear, or
+build real Google Drive API access (OAuth) into a proper backend once one
+exists — that's a bigger, separate build from this chat-based connector
+system.
+
+---
+
 ## Add new items below this line as they come up
