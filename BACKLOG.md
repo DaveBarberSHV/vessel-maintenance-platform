@@ -45,4 +45,43 @@ at least *surface* the right drawing even without pulling text from it.
 
 ---
 
+## Dense spec tables get lost in page-level chunks
+
+**What:** Tested query "what is the operating temperature range for the
+central unit" against the real MPC 800A manual. The correct answer (0–50°C)
+is on page 10 — but retrieval missed it, surfacing descriptive pages about
+the Central Unit instead.
+
+**Why:** Page 10 is one giant technical data table (main data + environmental
+tests + EMC tests all together) collapsed into a single text chunk. The word
+"temperature" is one hit among dozens of other equally-rare terms (kHz, dB,
+VDC, IEC standard numbers) in that same chunk, so it doesn't stand out enough
+to rank highly — with either the TF-IDF placeholder or, likely, with a real
+embedding model too, since the problem is chunk granularity, not just the
+embedding method.
+
+**Path to fixing it:** Table-aware chunking — detect table regions (e.g. via
+pdfplumber's table extraction, which returns row/column structure) and split
+dense multi-row tables into smaller chunks (per table, or per few rows)
+rather than lumping a whole table-heavy page into one chunk.
+
+---
+
+## Placeholder embeddings (TF-IDF) need replacing before real use
+
+**What:** `ingestion/retrieval.py` currently uses TF-IDF (keyword overlap) as
+a stand-in for real semantic embeddings, chosen because this sandbox can't
+reach an embedding model host over the network.
+
+**Why deferred:** Good enough to prove out the store/query/rank plumbing;
+not good enough for production — it'll miss matches that use different
+words for the same idea (e.g. "won't start" vs "fails to crank").
+
+**Path to fixing it:** Swap `TfidfEmbedder` for a real embedding model
+(Voyage AI — Anthropic's embedding partner — or a local sentence-transformers
+model) once the backend has real network/API access. Same `__call__`
+interface, so it's a drop-in replacement, not a redesign.
+
+---
+
 ## Add new items below this line as they come up
