@@ -92,7 +92,9 @@ def build_collection():
 
     # Embed in batches — Voyage (like most embedding APIs) has a per-request
     # size limit, and batching also means one bad chunk doesn't kill the
-    # whole run.
+    # whole run. A short pause between batches keeps this comfortably under
+    # rate limits even on lower tiers, rather than assuming maximum throughput.
+    import time
     batch_size = 20
     for i in range(0, len(text_chunks), batch_size):
         batch = text_chunks[i:i + batch_size]
@@ -109,6 +111,8 @@ def build_collection():
             } for c in batch],
         )
         print(f"Embedded {min(i + batch_size, len(text_chunks))}/{len(text_chunks)}...")
+        if i + batch_size < len(text_chunks):
+            time.sleep(15)
 
     print(f"\nIndexed {len(text_chunks)} chunks with real embeddings "
           f"({skipped} skipped — no text layer).")
