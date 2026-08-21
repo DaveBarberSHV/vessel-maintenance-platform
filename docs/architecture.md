@@ -35,7 +35,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     A["🔲 Question<br/>From engineer"] --> B["🔵 Vector search<br/>Chroma DB"]
-    B --> C["🔵 Claude API<br/>Anthropic"]
+    B --> C["✅ Claude API<br/>Anthropic"]
     C --> D["🔲 Cited answer<br/>To engineer"]
 ```
 
@@ -44,8 +44,9 @@ flowchart LR
   dense-table chunking gap found during testing).
 - **Claude API** — `ingestion/answer_query.py`. Builds a prompt from
   retrieved excerpts, instructs Claude to answer only from those excerpts,
-  and to cite document + revision + page. Prompt construction tested via
-  `--dry-run`; the live call itself is untested pending your own API key.
+  and to cite document + revision + page. **Live-tested successfully
+  (Aug 2026)** — correctly synthesized a multi-page procedure and honestly
+  flagged a missing revision number rather than guessing at one.
 
 ## Not yet on this diagram (known future moves)
 
