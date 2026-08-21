@@ -1,0 +1,238 @@
+"""
+Incremental folder ingestion — scans a folder of TMs and processes only
+what's new or changed since the last run.
+
+Why this matters: without this, adding one new TM to a 20-file library
+would mean re-parsing and re-embedding all 20 every time — wasted time,
+and wasted Voyage API cost, for files that didn't change. This script
+keeps a manifest (manifest.json) recording a hash of each file it has
+already processed, so:
+  - Unchanged files: skipped entirely, instantly.
+  - New files: parsed, chunked, and embedded — only these hit the Voyage API.
+  - Changed files (e.g. a TM replaced with a new revision): the OLD chunks
+    for that file are removed (from chunks.jsonl and from the Chroma
+    index) before the new version is processed, so nothing stale lingers.
+
+Relies on the naming convention (see docs/naming_convention discussion):
+    [System]_[Manufacturer]_[Model]_[DocType]_Rev[X].pdf
+Example:
+    Clutch_BergPropulsion_MCH6_OMM_RevA.pdf
+
+Files that don't match this pattern are reported and skipped, rather than
+guessed at — a wrong metadata guess is worse than a file that needs a
+quick rename.
+
+Usage:
+    python scan_folder.py /path/to/your/Drive/Drivetrain-TMs
+    python scan_folder.py /path/to/folder --engine tfidf   # for offline testing
+"""
+
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+from parse_and_chunk import chunk_document
+from retrieval import TfidfEmbedder, VoyageEmbedder, db_path, get_voyage_key, COLLECTION_NAME
+
+import chromadb
+
+MANIFEST_PATH = Path(__file__).parent / "manifest.json"
+CHUNKS_PATH = Path(__file__).parent / "chunks.jsonl"
+
+# Single-vessel prototype — same for every file. If a second vessel is
+# ever added to this library, this needs to become per-file (e.g. a
+# subfolder per vessel), not a single constant. See BACKLOG.md.
+VESSEL = "Master Boat Builders Hull 469 (tug+barge combo)"
+ORDER_NO = "7396A1"
+
+FILENAME_PATTERN = re.compile(
+    r"^(?P<system>[A-Za-z0-9]+)_(?P<manufacturer>[A-Za-z0-9]+)_(?P<model>[A-Za-z0-9]+)_"
+    r"(?P<doctype>[A-Za-z0-9]+)_(?P<revision>Rev[A-Za-z0-9]+)\.pdf$",
+    re.IGNORECASE,
+)
+
+DOCTYPE_LABELS = {
+    "OMM": "O&M Manual",
+    "GADRAWING": "General Arrangement Drawing",
+    "PARTSLIST": "Parts List",
+    "SERVICEBULLETIN": "Service Bulletin",
+    "WIRINGDIAGRAM": "Wiring Diagram",
+}
+
+
+def parse_filename(filename: str) -> dict | None:
+    """Extract metadata from a filename following the naming convention.
+    Returns None if the filename doesn't match — such files are reported,
+    not guessed at."""
+    m = FILENAME_PATTERN.match(filename)
+    if not m:
+        return None
+    doctype_raw = m.group("doctype").upper()
+    return {
+        "vessel": VESSEL,
+        "order_no": ORDER_NO,
+        "equipment_model": f"{m.group('manufacturer')} {m.group('model')}",
+        "document_type": DOCTYPE_LABELS.get(doctype_raw, doctype_raw),
+        "document_title": f"{m.group('system')} - {m.group('manufacturer')} {m.group('model')} "
+                           f"{DOCTYPE_LABELS.get(doctype_raw, doctype_raw)}",
+        "revision": m.group("revision"),
+    }
+
+
+def file_hash(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(65536), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def load_manifest() -> dict:
+    if MANIFEST_PATH.exists():
+        with open(MANIFEST_PATH) as f:
+            return json.load(f)
+    return {}
+
+
+def save_manifest(manifest: dict):
+    with open(MANIFEST_PATH, "w") as f:
+        json.dump(manifest, f, indent=2)
+
+
+def load_chunks() -> list[dict]:
+    if not CHUNKS_PATH.exists():
+        return []
+    with open(CHUNKS_PATH) as f:
+        return [json.loads(line) for line in f]
+
+
+def save_chunks(chunks: list[dict]):
+    with open(CHUNKS_PATH, "w") as f:
+        for c in chunks:
+            f.write(json.dumps(c) + "\n")
+
+
+def get_embedder(engine: str):
+    if engine == "voyage":
+        return VoyageEmbedder(get_voyage_key(), input_type="document")
+    elif engine == "tfidf":
+        sys.exit("tfidf engine requires a fitted vectorizer over the full corpus — "
+                 "run 'python retrieval.py build --engine tfidf' for a full rebuild instead. "
+                 "Incremental scanning is only supported for the voyage engine.")
+    else:
+        sys.exit(f"Unknown engine '{engine}'.")
+
+
+def scan_folder(folder: Path, engine: str = "voyage"):
+    manifest = load_manifest()
+    chunks = load_chunks()
+    chunks_by_file = {}
+    for c in chunks:
+        chunks_by_file.setdefault(c["source_file"], []).append(c)
+
+    pdf_files = sorted(folder.rglob("*.pdf"))
+    if not pdf_files:
+        sys.exit(f"No PDF files found in {folder}")
+
+    unmatched = []
+    unchanged = []
+    to_process = []  # (path, metadata, is_update)
+
+    for path in pdf_files:
+        metadata = parse_filename(path.name)
+        if metadata is None:
+            unmatched.append(path.name)
+            continue
+
+        current_hash = file_hash(path)
+        prior = manifest.get(path.name)
+
+        if prior and prior["hash"] == current_hash:
+            unchanged.append(path.name)
+            continue
+
+        to_process.append((path, metadata, prior is not None))
+
+    print(f"Scanned {len(pdf_files)} PDF(s) in {folder}")
+    print(f"  {len(unchanged)} unchanged — skipped")
+    print(f"  {len(to_process)} new or changed — will process")
+    if unmatched:
+        print(f"  {len(unmatched)} did NOT match naming convention — skipped, not guessed at:")
+        for name in unmatched:
+            print(f"    - {name}")
+
+    if not to_process:
+        print("\nNothing to do.")
+        return
+
+    # Set up Chroma collection for incremental add (and delete, for updates)
+    path_db = db_path(engine)
+    path_db.mkdir(parents=True, exist_ok=True)
+    embedder = get_embedder(engine)
+    client = chromadb.PersistentClient(path=str(path_db))
+    collection = client.get_or_create_collection(COLLECTION_NAME, embedding_function=embedder)
+
+    new_chunk_count = 0
+    for path, metadata, is_update in to_process:
+        action = "Updating" if is_update else "Adding"
+        print(f"\n{action}: {path.name}")
+
+        # If this file was seen before with different content, remove its
+        # old chunks first — from chunks.jsonl AND from the embedded index —
+        # so no stale data lingers under a changed revision.
+        if is_update:
+            old_chunk_ids = manifest[path.name]["chunk_ids"]
+            chunks = [c for c in chunks if c["chunk_id"] not in old_chunk_ids]
+            try:
+                collection.delete(ids=old_chunk_ids)
+            except Exception:
+                pass  # ids may not all exist if index was rebuilt separately; safe to ignore
+            print(f"  Removed {len(old_chunk_ids)} old chunks (superseded revision)")
+
+        file_chunks = chunk_document(path, metadata)
+        text_chunks = [c for c in file_chunks if c.has_text_layer and c.text.strip()]
+
+        if text_chunks:
+            collection.add(
+                ids=[c.chunk_id for c in text_chunks],
+                documents=[c.text for c in text_chunks],
+                metadatas=[{
+                    "document_title": c.document_title,
+                    "revision": c.revision,
+                    "page_number": c.page_number,
+                    "equipment_model": c.equipment_model,
+                    "document_type": c.document_type,
+                    "source_file": c.source_file,
+                } for c in text_chunks],
+            )
+
+        from dataclasses import asdict
+        new_chunks = [asdict(c) for c in file_chunks]
+        chunks.extend(new_chunks)
+        new_chunk_count += len(file_chunks)
+
+        manifest[path.name] = {
+            "hash": file_hash(path),
+            "chunk_ids": [c.chunk_id for c in file_chunks],
+        }
+        print(f"  {len(file_chunks)} chunks ({len(text_chunks)} embedded, "
+              f"{len(file_chunks) - len(text_chunks)} metadata-only — no text layer)")
+
+    save_chunks(chunks)
+    save_manifest(manifest)
+    print(f"\nDone. {new_chunk_count} chunks added/updated across {len(to_process)} file(s). "
+          f"{len(unchanged)} file(s) untouched.")
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    engine = "voyage"
+    if "--engine" in args:
+        idx = args.index("--engine")
+        engine = args[idx + 1]
+        del args[idx:idx + 2]
+    if not args:
+        sys.exit("Usage: python scan_folder.py /path/to/TM/folder [--engine voyage|tfidf]")
+    scan_folder(Path(args[0]), engine=engine)
