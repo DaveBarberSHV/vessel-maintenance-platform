@@ -56,6 +56,15 @@ flowchart LR
 
 ## Not yet on this diagram (known future moves)
 
+- **A front end.** Deliberately not started — right now every component is
+  a script you and Dave run by hand and inspect closely, which is exactly
+  how real bugs (TF-IDF's blind spot, the checkbox-table risk) got caught.
+  A polished interface in front of a system with known accuracy gaps would
+  look more trustworthy than it is. Priority order: fix table extraction
+  first (see `BACKLOG.md` — this matters more than initially scoped, since
+  the full TM library is expected to have denser, more complex tables than
+  the prototype set), then build a front end once retrieval accuracy is
+  something the whole engineering department could rely on.
 - A real hosted backend (this whole pipeline currently lives in a chat
   sandbox, not a deployed service)
 - A live Google Drive connector, if/when one becomes available

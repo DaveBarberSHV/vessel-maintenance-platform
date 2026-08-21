@@ -45,7 +45,16 @@ at least *surface* the right drawing even without pulling text from it.
 
 ---
 
-## Dense spec tables get lost in page-level chunks
+## 🔺 PRIORITY — Dense spec tables get lost in page-level chunks
+
+**Elevated (Aug 2026):** Dave confirms many TMs in the full drivetrain
+library have tables more complex/dense than this prototype's examples.
+This is no longer a corner case worth fixing eventually — it's likely
+closer to core reliability, and should be the top priority once the
+current session's testing wraps up. Recommended sequencing: fix this
+before building any front end (see `docs/architecture.md`), since a
+polished interface over an unreliable table-reading system would be worse
+than no interface at all.
 
 **What:** Tested query "what is the operating temperature range for the
 central unit" against the real MPC 800A manual. The correct answer (0–50°C)
@@ -118,7 +127,12 @@ system.
 
 ---
 
-## Checkbox/marker tables lose their meaning in text extraction
+## 🔺 PRIORITY — Checkbox/marker tables lose their meaning in text extraction
+
+**Elevated (Aug 2026):** Same priority bump as the dense-table entry above —
+Dave confirms the full TM library likely has more of these than the
+prototype set. Fix both table issues together; they likely share the same
+underlying solution (pdfplumber table-structure extraction).
 
 **What:** Tested "list the 100-hour checks for the marine clutch" live.
 The answer was correct (2 of 3 jobs apply at 100 hours; the third applies
