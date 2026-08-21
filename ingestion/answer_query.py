@@ -14,13 +14,13 @@ Get a key at: https://console.anthropic.com
 
 Usage:
     python answer_query.py "How do I replace the oil filter on the clutch?"
-    python answer_query.py --dry-run "..."   # builds the prompt, doesn't call the API
+    python answer_query.py --engine voyage "..."   # use real embeddings instead of TF-IDF
+    python answer_query.py --dry-run "..."         # builds the prompt, doesn't call the API
 """
 
 import os
 import sys
 
-from retrieval import query_chunks  # see note below — retrieval.py needs a small refactor to expose this
 
 SYSTEM_PROMPT = """You are a technical assistant for a ship's engineering department. \
 You answer equipment questions using ONLY the manual excerpts provided below — \
@@ -53,7 +53,11 @@ Manual excerpts retrieved for this question:
 Answer the question using only the excerpts above."""
 
 
-def answer(question: str, dry_run: bool = False, top_k: int = 3):
+def answer(question: str, engine: str = "tfidf", dry_run: bool = False, top_k: int = 3):
+    if engine == "voyage":
+        from retrieval_voyage import query_chunks
+    else:
+        from retrieval import query_chunks
     chunks = query_chunks(question, top_k=top_k)
     prompt = build_prompt(question, chunks)
 
@@ -88,6 +92,11 @@ if __name__ == "__main__":
     dry_run = "--dry-run" in args
     if dry_run:
         args.remove("--dry-run")
+    engine = "tfidf"
+    if "--engine" in args:
+        idx = args.index("--engine")
+        engine = args[idx + 1]
+        del args[idx:idx + 2]
     if not args:
-        sys.exit('Usage: python answer_query.py [--dry-run] "your question"')
-    answer(args[0], dry_run=dry_run)
+        sys.exit('Usage: python answer_query.py [--engine tfidf|voyage] [--dry-run] "your question"')
+    answer(args[0], engine=engine, dry_run=dry_run)
