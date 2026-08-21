@@ -77,10 +77,24 @@ reach an embedding model host over the network.
 not good enough for production — it'll miss matches that use different
 words for the same idea (e.g. "won't start" vs "fails to crank").
 
+**Concrete failure case (Aug 2026):** Live-tested "My propulsion equipment
+has shut down. What could be causing it?" — the two genuinely relevant
+pages (MCH6 p.26's alarm/shutdown threshold table; MPC 800A p.34's fault-
+handling table) were NOT retrieved. Instead, three generic PPE/safety
+boilerplate pages were retrieved, because they repeat the literal phrase
+"propulsion equipment" densely, which TF-IDF over-weighted versus the
+actually-relevant tables. This is the clearest evidence yet that the
+placeholder needs replacing — a real embedding model should recognize
+semantic relevance ("shut down" ↔ a table of shutdown thresholds) over
+superficial phrase repetition.
+
 **Path to fixing it:** Swap `TfidfEmbedder` for a real embedding model
 (Voyage AI — Anthropic's embedding partner — or a local sentence-transformers
 model) once the backend has real network/API access. Same `__call__`
-interface, so it's a drop-in replacement, not a redesign.
+interface, so it's a drop-in replacement, not a redesign. **Note:** unlike
+this sandbox, Dave's own machine has unrestricted network access — the same
+way the live Claude API test was run locally, a real embedding model could
+also be tested locally without waiting for a separate backend deployment.
 
 ---
 
