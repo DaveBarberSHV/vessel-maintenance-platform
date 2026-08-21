@@ -67,34 +67,36 @@ rather than lumping a whole table-heavy page into one chunk.
 
 ---
 
-## Placeholder embeddings (TF-IDF) need replacing before real use
+## ✅ RESOLVED — Placeholder embeddings replaced with real embeddings (Voyage AI)
 
-**What:** `ingestion/retrieval.py` currently uses TF-IDF (keyword overlap) as
-a stand-in for real semantic embeddings, chosen because this sandbox can't
-reach an embedding model host over the network.
+**What it was:** `ingestion/retrieval.py` used TF-IDF (keyword overlap) as a
+stand-in for real semantic embeddings, chosen because Claude's sandbox
+can't reach an embedding model host over the network.
 
-**Why deferred:** Good enough to prove out the store/query/rank plumbing;
-not good enough for production — it'll miss matches that use different
-words for the same idea (e.g. "won't start" vs "fails to crank").
+**Concrete failure case that motivated the fix (Aug 2026):** Live-tested
+"My propulsion equipment has shut down. What could be causing it?" — TF-IDF
+retrieved three generic PPE/safety boilerplate pages (matched on the
+repeated literal phrase "propulsion equipment") instead of the two
+genuinely relevant pages: MCH6 p.15's shutdown-condition list (high oil
+temp, low lube pressure) and MPC 800A p.34's fault-handling table.
 
-**Concrete failure case (Aug 2026):** Live-tested "My propulsion equipment
-has shut down. What could be causing it?" — the two genuinely relevant
-pages (MCH6 p.26's alarm/shutdown threshold table; MPC 800A p.34's fault-
-handling table) were NOT retrieved. Instead, three generic PPE/safety
-boilerplate pages were retrieved, because they repeat the literal phrase
-"propulsion equipment" densely, which TF-IDF over-weighted versus the
-actually-relevant tables. This is the clearest evidence yet that the
-placeholder needs replacing — a real embedding model should recognize
-semantic relevance ("shut down" ↔ a table of shutdown thresholds) over
-superficial phrase repetition.
+**Resolution (Aug 2026):** Built `ingestion/retrieval_voyage.py` using
+Voyage AI, tested live on Dave's own machine (which has normal network
+access, unlike Claude's sandbox). Ran the identical query through both
+engines side by side:
+- **TF-IDF:** missed both relevant pages, correctly said it didn't have
+  enough information rather than guessing.
+- **Voyage:** correctly retrieved both pages. Citation to MCH6 p.15 was
+  verified against the actual manual text — verbatim accurate, not a lucky
+  guess.
 
-**Path to fixing it:** Swap `TfidfEmbedder` for a real embedding model
-(Voyage AI — Anthropic's embedding partner — or a local sentence-transformers
-model) once the backend has real network/API access. Same `__call__`
-interface, so it's a drop-in replacement, not a redesign. **Note:** unlike
-this sandbox, Dave's own machine has unrestricted network access — the same
-way the live Claude API test was run locally, a real embedding model could
-also be tested locally without waiting for a separate backend deployment.
+Same `__call__` interface as the TF-IDF version, so this was a genuine
+drop-in swap, not a redesign. `answer_query.py --engine voyage|tfidf` lets
+either be selected for comparison going forward.
+
+**Still open from this:** batch-pacing scaling for large corpora (separate
+entry below), and deciding whether Voyage becomes the sole engine or TF-IDF
+stays available for offline/no-API-key testing.
 
 ---
 

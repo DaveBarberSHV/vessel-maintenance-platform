@@ -12,7 +12,7 @@ live test on your end · 🟡 planned, not yet built
 ```mermaid
 flowchart LR
     A["🔲 Google Drive<br/>Manual upload by Jared/Dave"] --> B["✅ Parse & chunk<br/>Tag with metadata"]
-    B --> C["🟡 Embed chunks<br/>Voyage AI — planned"]
+    B --> C["✅ Embed chunks<br/>Voyage AI"]
     C --> D["✅ Vector store<br/>Chroma DB"]
 ```
 
@@ -23,25 +23,31 @@ flowchart LR
 - **Parse & chunk** — `ingestion/parse_and_chunk.py`. Tested against the
   first three real TMs. Known gap: drawings with no text layer (see
   `BACKLOG.md`) get metadata-only treatment, no searchable text chunk.
-- **Embed chunks** — not yet built. Currently stubbed with TF-IDF
-  (`ingestion/retrieval.py`'s `TfidfEmbedder`) so the storage/query plumbing
-  could be tested without needing network access to a real embedding
-  provider. Swapping in Voyage AI (Anthropic's embedding partner) is next.
-- **Vector store** — Chroma, embedded directly in the pipeline
-  (`ingestion/retrieval.py`). No separate hosting needed at this scale.
+- **Embed chunks** — `ingestion/retrieval_voyage.py`. Real semantic
+  embeddings via Voyage AI (Anthropic's embedding partner), live-tested
+  successfully (Aug 2026) — see `BACKLOG.md`'s resolved TF-IDF entry for
+  the side-by-side proof. A TF-IDF fallback (`retrieval.py`) remains
+  available via `answer_query.py --engine tfidf` for offline testing
+  without an API key.
+- **Vector store** — Chroma, embedded directly in the pipeline. Two
+  parallel collections currently exist (`chroma_db` for TF-IDF,
+  `chroma_db_voyage` for real embeddings) — worth consolidating to one once
+  Voyage is confirmed as the permanent choice.
 
 ## Query time (engineer asks a question, gets a cited answer)
 
 ```mermaid
 flowchart LR
-    A["🔲 Question<br/>From engineer"] --> B["🔵 Vector search<br/>Chroma DB"]
+    A["🔲 Question<br/>From engineer"] --> B["✅ Vector search<br/>Chroma DB"]
     B --> C["✅ Claude API<br/>Anthropic"]
     C --> D["🔲 Cited answer<br/>To engineer"]
 ```
 
-- **Vector search** — same Chroma store from ingestion. Retrieval logic
-  tested with real queries against real TMs (see `BACKLOG.md` for the
-  dense-table chunking gap found during testing).
+- **Vector search** — same Chroma store from ingestion, now backed by real
+  Voyage embeddings. Live-tested with a hard, broad diagnostic question
+  ("My propulsion equipment has shut down") that TF-IDF completely missed;
+  Voyage correctly found and cited both relevant pages across both manuals,
+  verified accurate against the source text. See `BACKLOG.md`.
 - **Claude API** — `ingestion/answer_query.py`. Builds a prompt from
   retrieved excerpts, instructs Claude to answer only from those excerpts,
   and to cite document + revision + page. **Live-tested successfully
