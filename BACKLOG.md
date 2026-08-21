@@ -104,8 +104,18 @@ drop-in swap, not a redesign. `answer_query.py --engine voyage|tfidf` lets
 either be selected for comparison going forward.
 
 **Still open from this:** batch-pacing scaling for large corpora (separate
-entry below), and deciding whether Voyage becomes the sole engine or TF-IDF
-stays available for offline/no-API-key testing.
+entry below).
+
+**Update (Aug 2026):** `retrieval.py` and `retrieval_voyage.py` have been
+consolidated into a single `retrieval.py` — Voyage is now the default
+engine (`--engine voyage`, or no flag at all), TF-IDF remains available for
+offline testing (`--engine tfidf`). Done ahead of Jared's ~20 additional
+TMs so there's one clear pipeline to run, not two to keep in sync.
+**Note:** the Chroma database folder layout changed as part of this — old
+`chroma_db/` and `chroma_db_voyage/` folders are stale and can be deleted;
+new layout is `chroma_db/voyage/` and `chroma_db/tfidf/`. Anyone pulling
+this update needs to re-run `python retrieval.py build` once (defaults to
+Voyage) before querying again.
 
 ---
 

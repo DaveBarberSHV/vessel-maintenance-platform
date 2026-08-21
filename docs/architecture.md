@@ -23,16 +23,16 @@ flowchart LR
 - **Parse & chunk** — `ingestion/parse_and_chunk.py`. Tested against the
   first three real TMs. Known gap: drawings with no text layer (see
   `BACKLOG.md`) get metadata-only treatment, no searchable text chunk.
-- **Embed chunks** — `ingestion/retrieval_voyage.py`. Real semantic
-  embeddings via Voyage AI (Anthropic's embedding partner), live-tested
-  successfully (Aug 2026) — see `BACKLOG.md`'s resolved TF-IDF entry for
-  the side-by-side proof. A TF-IDF fallback (`retrieval.py`) remains
-  available via `answer_query.py --engine tfidf` for offline testing
-  without an API key.
-- **Vector store** — Chroma, embedded directly in the pipeline. Two
-  parallel collections currently exist (`chroma_db` for TF-IDF,
-  `chroma_db_voyage` for real embeddings) — worth consolidating to one once
-  Voyage is confirmed as the permanent choice.
+- **Embed chunks** — `ingestion/retrieval.py`. Real semantic embeddings via
+  Voyage AI (Anthropic's embedding partner) are now the default engine,
+  live-tested successfully (Aug 2026) — see `BACKLOG.md`'s resolved TF-IDF
+  entry for the side-by-side proof. TF-IDF remains available via
+  `--engine tfidf` for offline testing without an API key.
+- **Vector store** — Chroma, embedded directly in the pipeline. One module
+  now manages both engines, each in its own subfolder
+  (`chroma_db/voyage/`, `chroma_db/tfidf/`) so they never collide —
+  consolidated from two separate scripts on Aug 2026, ahead of the ~20
+  additional TMs expected from Jared.
 
 ## Query time (engineer asks a question, gets a cited answer)
 
