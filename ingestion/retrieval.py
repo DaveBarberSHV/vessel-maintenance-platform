@@ -91,7 +91,10 @@ def build_collection():
     print(f"Indexed {len(text_chunks)} chunks ({skipped} skipped — no text layer).")
 
 
-def query(question: str, top_k: int = 3):
+def query_chunks(question: str, top_k: int = 3) -> list[dict]:
+    """Core retrieval function: returns a list of {text, metadata, distance}
+    dicts for the top_k most relevant chunks. Used by both the CLI query
+    command below and by answer_query.py to build a Claude prompt."""
     import pickle
     with open(DB_PATH / "vectorizer.pkl", "rb") as f:
         vectorizer = pickle.load(f)
@@ -102,10 +105,21 @@ def query(question: str, top_k: int = 3):
 
     results = collection.query(query_texts=[question], n_results=top_k)
 
+    return [
+        {"text": doc, "metadata": meta, "distance": dist}
+        for doc, meta, dist in zip(
+            results["documents"][0], results["metadatas"][0], results["distances"][0]
+        )
+    ]
+
+
+def query(question: str, top_k: int = 3):
+    """CLI-facing wrapper: prints results for human inspection."""
+    chunks = query_chunks(question, top_k=top_k)
+
     print(f'\nQuery: "{question}"\n')
-    for i, (doc, meta, dist) in enumerate(zip(
-        results["documents"][0], results["metadatas"][0], results["distances"][0]
-    )):
+    for i, c in enumerate(chunks):
+        doc, meta, dist = c["text"], c["metadata"], c["distance"]
         citation = f'{meta["document_title"]}, {meta["revision"]}, p. {meta["page_number"]}'
         print(f"[{i+1}] {citation}  (distance={dist:.3f})")
         print(f"    {doc[:180].replace(chr(10), ' ')}...")
