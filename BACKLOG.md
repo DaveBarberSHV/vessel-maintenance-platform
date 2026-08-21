@@ -102,4 +102,33 @@ system.
 
 ---
 
+## Checkbox/marker tables lose their meaning in text extraction
+
+**What:** Tested "list the 100-hour checks for the marine clutch" live.
+The answer was correct (2 of 3 jobs apply at 100 hours; the third applies
+only at 500 hours) — but checking the actual page image revealed the
+underlying table uses filled dots (●) to mark which interval column each
+job belongs to. Plain text extraction drops those dots entirely, so the
+extracted text lists job names and interval headers with no way to tell
+which job belongs to which interval.
+
+**Why this matters more than a typical extraction gap:** The answer being
+right this time may have been Claude reasoning from a plausible pattern
+(oil changes tend to come at a longer interval than inspections) rather
+than reading a fact that was actually present in what it was given. Nothing
+in the citation would reveal that difference — a wrong answer here would
+look exactly as confident and well-cited as a right one. For a maintenance
+checklist someone might actually follow onboard, that's a meaningfully
+different risk than a merely-hard-to-find spec.
+
+**Path to fixing it:** Table-aware extraction (see the related dense-table
+entry above) needs to specifically preserve marker/checkbox state per cell,
+not just cell text — e.g. via pdfplumber's table extraction, representing
+each row as structured data ("job: X, applies_at: [100]") rather than
+flattened prose. Until that's built, treat any answer describing which
+items apply "at this interval" as needing a manual cross-check against the
+actual table image, not just the manual text.
+
+---
+
 ## Add new items below this line as they come up
