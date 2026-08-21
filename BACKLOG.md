@@ -145,4 +145,26 @@ actual table image, not just the manual text.
 
 ---
 
+## Voyage embedding batch pacing won't scale to the full TM library
+
+**What:** `retrieval_voyage.py` currently pauses 15 seconds between every
+batch of 20 chunks, added as a quick fix when the first embedding run hit
+Voyage's reduced rate limit (before a payment method was added). First real
+run succeeded: 112 chunks in ~6 batches, ~1.5 minutes overhead.
+
+**Why deferred:** Worked fine for a 112-chunk corpus. Won't scale
+gracefully once Jared's full TM library (dozens of manuals, potentially
+thousands of pages) needs (re-)embedding — flat unconditional pauses add up
+fast and aren't smart about it.
+
+**Path to fixing it:** Two real options, worth choosing deliberately rather
+than just tuning the sleep number: (1) increase batch size toward Voyage's
+actual per-request limits so fewer requests are needed overall, and/or (2)
+only back off when an actual rate-limit error comes back, rather than
+pausing unconditionally on every batch regardless of whether it's needed —
+now that a payment method is on file, the account may not even hit the
+reduced limit anymore, making the current pause pure overhead.
+
+---
+
 ## Add new items below this line as they come up
