@@ -2,13 +2,15 @@
 Prototype ingestion pipeline: parse -> chunk (by page/section) -> tag with metadata.
 
 Design note on parsing:
-  In production, source files will be ordinary PDFs and should be parsed with
-  pdftotext / pdfplumber directly. The three files in this project happen to be
-  stored by the platform in a pre-processed container (per-page JPEG + extracted
-  text + manifest.json) rather than as raw PDF bytes, so this script reads that
-  container when present and falls back to pdftotext for a normal PDF. Either
-  path produces the same output structure, so the chunking/tagging logic below
-  is what would actually ship in the backend.
+  Source files should be ordinary PDFs. For genuine PDFs, this script uses
+  pdfplumber for both plain text AND structured table extraction — the
+  latter recovers marker/checkbox cells (see table_extraction.py) that
+  plain text extraction alone would leave ambiguous, which turned out to
+  matter a lot in practice (see BACKLOG.md's checkbox-table entry). A
+  handful of files in this project were stored by the platform in a
+  pre-processed container (per-page JPEG + extracted text + manifest.json)
+  rather than as raw PDF bytes — that path is kept as a fallback since it
+  doesn't support table structure recovery, only plain text.
 """
 
 import json
@@ -17,6 +19,10 @@ import subprocess
 import zipfile
 from pathlib import Path
 from dataclasses import dataclass, asdict
+
+import pdfplumber
+
+from table_extraction import extract_structured_tables, render_as_markdown
 
 
 @dataclass
@@ -37,7 +43,8 @@ class Chunk:
 
 def extract_pages(path: Path):
     """Return list of (page_number, text) tuples. Tries platform container
-    format first, falls back to pdftotext for genuine PDFs."""
+    format first (plain text only), falls back to pdfplumber for genuine
+    PDFs (plain text + structured table recovery)."""
     try:
         with zipfile.ZipFile(path) as z:
             names = z.namelist()
@@ -52,17 +59,21 @@ def extract_pages(path: Path):
     except zipfile.BadZipFile:
         pass
 
-    # Fallback: genuine PDF -> pdftotext, one page at a time
-    info = subprocess.run(["pdfinfo", str(path)], capture_output=True, text=True).stdout
-    m = re.search(r"Pages:\s+(\d+)", info)
-    num_pages = int(m.group(1)) if m else 1
+    # Fallback: genuine PDF -> pdfplumber, one page at a time. Text and
+    # table structure both come from the same library here, deliberately —
+    # pdftotext alone can't recover marker/checkbox cells.
     pages = []
-    for i in range(1, num_pages + 1):
-        out = subprocess.run(
-            ["pdftotext", "-layout", "-f", str(i), "-l", str(i), str(path), "-"],
-            capture_output=True, text=True,
-        ).stdout
-        pages.append((i, out))
+    with pdfplumber.open(path) as pdf:
+        for i, page in enumerate(pdf.pages, start=1):
+            text = page.extract_text() or ""
+
+            tables = extract_structured_tables(page)
+            if tables:
+                table_blocks = "\n\n".join(render_as_markdown(t) for t in tables)
+                text = f"{text}\n\n{table_blocks}"
+
+            pages.append((i, text))
+    return pages
     return pages
 
 
@@ -113,14 +124,14 @@ DOCS = [
         },
     },
     {
-        "path": Path("/mnt/project/7396A1__OP_AND_MAINT_MANUALMCH6.pdf"),
+        "path": Path("/mnt/user-data/uploads/7396A1_-_OP_AND_MAINT_MANUAL-MCH6.pdf"),
         "metadata": {
             "vessel": "Master Boat Builders Hull 469 (tug+barge combo)",
             "order_no": "7396A1",
             "equipment_model": "MCH6 Marine Clutch Highspeed",
             "document_type": "O&M Manual",
             "document_title": "Operation and Maintenance Manual - MCH Marine Clutch Highspeed 6",
-            "revision": "unknown - not marked in filename or body; flag for confirmation",
+            "revision": "Document Version 1 (May 24, 2021) - confirmed from title page of genuine PDF upload",
         },
     },
     {
@@ -146,7 +157,7 @@ if __name__ == "__main__":
         print(f"{doc['path'].name}: {len(chunks)} pages -> {text_pages} with extractable text, "
               f"{len(chunks) - text_pages} requiring OCR/vision")
 
-    out_path = Path("/home/claude/ingestion/chunks.jsonl")
+    out_path = Path(__file__).parent / "chunks.jsonl"
     with open(out_path, "w") as f:
         for c in all_chunks:
             f.write(json.dumps(asdict(c)) + "\n")

@@ -137,37 +137,44 @@ system.
 
 ---
 
-## 🔺 PRIORITY — Checkbox/marker tables lose their meaning in text extraction
+## ✅ RESOLVED — Checkbox/marker tables lose their meaning in text extraction
 
-**Elevated (Aug 2026):** Same priority bump as the dense-table entry above —
-Dave confirms the full TM library likely has more of these than the
-prototype set. Fix both table issues together; they likely share the same
-underlying solution (pdfplumber table-structure extraction).
+**What it was:** Tables like the MCH6 manual's maintenance schedule mark
+which interval column a job applies to with a small filled dot — a drawn
+image, not a text character. Plain text extraction dropped it entirely, so
+"list the 100-hour checks" got the right answer once by what may have been
+reasonable-sounding inference rather than verified fact — risky for a
+maintenance checklist, since a wrong answer would look exactly as
+confident as a right one.
 
-**What:** Tested "list the 100-hour checks for the marine clutch" live.
-The answer was correct (2 of 3 jobs apply at 100 hours; the third applies
-only at 500 hours) — but checking the actual page image revealed the
-underlying table uses filled dots (●) to mark which interval column each
-job belongs to. Plain text extraction drops those dots entirely, so the
-extracted text lists job names and interval headers with no way to tell
-which job belongs to which interval.
+**Resolution (Aug 2026):** Built `ingestion/table_extraction.py`. Confirmed
+the dots are small embedded images (~9×10pt) at consistent x-positions per
+column; cross-referenced their positions against pdfplumber's table cell
+boundaries to determine exactly which cell each marker sits in — turning
+an ambiguous blank cell into a verified fact taken from the document's own
+structure. Verified against the real MCH6 PDF (uploaded directly to this
+chat, not the platform-preprocessed copy — see note below) and confirmed
+byte-for-byte correct against the actual page image for both the
+Electric/Hydraulic and Hybrid configuration tables on page 32.
 
-**Why this matters more than a typical extraction gap:** The answer being
-right this time may have been Claude reasoning from a plausible pattern
-(oil changes tend to come at a longer interval than inspections) rather
-than reading a fact that was actually present in what it was given. Nothing
-in the citation would reveal that difference — a wrong answer here would
-look exactly as confident and well-cited as a right one. For a maintenance
-checklist someone might actually follow onboard, that's a meaningfully
-different risk than a merely-hard-to-find spec.
+Wired into `parse_and_chunk.py`: any page with tables now gets a rendered
+markdown version of the table appended to its chunk text, with marker
+cells filled in as "X" rather than left blank.
 
-**Path to fixing it:** Table-aware extraction (see the related dense-table
-entry above) needs to specifically preserve marker/checkbox state per cell,
-not just cell text — e.g. via pdfplumber's table extraction, representing
-each row as structured data ("job: X, applies_at: [100]") rather than
-flattened prose. Until that's built, treat any answer describing which
-items apply "at this interval" as needing a manual cross-check against the
-actual table image, not just the manual text.
+**Important process note this surfaced:** table structure recovery only
+works on genuine PDF files, not the platform's pre-processed preview
+format (page images + extracted text) that Project-attached files get
+converted into. Going forward, TMs should be uploaded directly to chat
+(not just added to Project files) when ingestion needs to run against
+them, so real PDF bytes are available. This also incidentally resolved
+the MCH6 "revision unknown" flag that's been in every citation this
+session — the real PDF's title page has "Document Version 1, May 24 2021"
+clearly stated.
+
+**Still open:** the related dense-table entry above (tables *without*
+marker cells, where a spec gets buried among unrelated ones in one big
+chunk) is a related but distinct problem — same underlying tool, different
+fix needed (splitting dense chunks, not recovering marker cells).
 
 ---
 

@@ -20,9 +20,14 @@ flowchart LR
   naming convention in `docs/naming_convention.md` *(create this if we
   formalize it further)*. No live connector exists yet — see `BACKLOG.md`.
   Files are uploaded here by hand, then manually pulled in for ingestion runs.
-- **Parse & chunk** — `ingestion/parse_and_chunk.py`. Tested against the
-  first three real TMs. Known gap: drawings with no text layer (see
-  `BACKLOG.md`) get metadata-only treatment, no searchable text chunk.
+- **Parse & chunk** — `ingestion/parse_and_chunk.py` + `ingestion/table_extraction.py`.
+  Genuine PDFs now get structured table extraction (recovers marker/checkbox
+  cells that plain text loses — verified fix, see `BACKLOG.md`), not just
+  plain text. Known gap: drawings with no text layer (see `BACKLOG.md`) get
+  metadata-only treatment, no searchable text chunk. **Process note:** table
+  recovery needs genuine PDF bytes — files only added to Project knowledge
+  (not uploaded directly to chat) get converted to a preview format that
+  can't support this; upload real PDFs directly when ingesting.
 - **Embed chunks** — `ingestion/retrieval.py`. Real semantic embeddings via
   Voyage AI (Anthropic's embedding partner) are now the default engine,
   live-tested successfully (Aug 2026) — see `BACKLOG.md`'s resolved TF-IDF
