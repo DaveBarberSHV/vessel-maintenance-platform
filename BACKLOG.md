@@ -200,4 +200,27 @@ reduced limit anymore, making the current pause pure overhead.
 
 ---
 
-## Add new items below this line as they come up
+## Incremental scanner's Chroma add/delete path needs a live test
+
+**What:** `ingestion/scan_folder.py` was built to solve a real workflow
+problem — as Jared adds TMs to Drive day by day, re-embedding the entire
+library on every addition would waste time and Voyage API cost. It hashes
+each file and skips anything unchanged, only processing new or changed
+files.
+
+**What's verified vs. not:** the hash-comparison logic (unchanged files
+correctly skipped, changed files — e.g. a revision swap — correctly
+detected) was tested directly and works. The actual Chroma
+`collection.add()` / `collection.delete()` calls for new/updated chunks
+could NOT be tested from Claude's sandbox (no network access to Voyage),
+so that path is implemented but not yet proven against the real index.
+
+**Path to fixing it:** first time Dave runs `scan_folder.py` for real
+(when Jared's TMs land), watch the output closely — confirm the reported
+counts (new/changed/unchanged) match expectations, and spot-check that a
+query against a newly-added TM actually returns results. If anything looks
+off, this is the first place to check.
+
+---
+
+
