@@ -40,5 +40,6 @@ BACKLOG.md           deferred items and why
 ## Open items
 
 See `BACKLOG.md` for deferred engineering decisions, `docs/architecture.md`
-for the current (evolving) architecture diagram, and the project brief in
-`docs/` for people/roles and full scope.
+for the current (evolving) architecture diagram, `docs/tm_upload_checklist.md`
+for what makes a good file to add to the TM library, and the project brief
+in `docs/` for people/roles and full scope.
