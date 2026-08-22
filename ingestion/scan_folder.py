@@ -31,7 +31,10 @@ import hashlib
 import json
 import re
 import sys
+from dataclasses import asdict
 from pathlib import Path
+
+import pdfplumber
 
 from parse_and_chunk import chunk_document
 from retrieval import TfidfEmbedder, VoyageEmbedder, db_path, get_voyage_key, COLLECTION_NAME
@@ -60,6 +63,42 @@ DOCTYPE_LABELS = {
     "SERVICEBULLETIN": "Service Bulletin",
     "WIRINGDIAGRAM": "Wiring Diagram",
 }
+
+
+def validate_pdf(path: Path) -> tuple[bool, str | None]:
+    """Sanity-check a file before processing. Returns (is_valid, issue).
+    A file that fails this should be reported clearly and skipped —
+    never guessed at or force-processed, since a corrupted or
+    misidentified file poisoning the index is worse than one missing TM."""
+    if path.stat().st_size == 0:
+        return False, "File is empty (0 bytes)"
+
+    if path.stat().st_size < 1024:
+        return False, "File is suspiciously small (<1KB) — likely not a real PDF"
+
+    try:
+        with pdfplumber.open(path) as pdf:
+            num_pages = len(pdf.pages)
+            if num_pages == 0:
+                return False, "PDF opens but has 0 pages"
+
+            # Sample first few pages to check for a text layer at all.
+            # Zero text across a whole manual usually means a scanned
+            # document with no OCR — not corrupted, but won't be
+            # searchable beyond metadata. Worth flagging, not blocking.
+            sample_pages = pdf.pages[:min(3, num_pages)]
+            total_text = sum(len((p.extract_text() or "").strip()) for p in sample_pages)
+            if total_text == 0 and num_pages > 1:
+                return True, ("WARNING: no extractable text found in first pages — "
+                              "likely a scanned document with no text layer. "
+                              "Will be indexed as metadata-only, not full-text searchable.")
+
+    except Exception as e:
+        # Covers corrupted files, password-protected PDFs, and anything
+        # else that makes the file unreadable as a PDF at all.
+        return False, f"Could not open as a valid PDF ({type(e).__name__}: {e})"
+
+    return True, None
 
 
 def parse_filename(filename: str) -> dict | None:
@@ -138,6 +177,8 @@ def scan_folder(folder: Path, engine: str = "voyage"):
 
     unmatched = []
     unchanged = []
+    invalid = []       # (filename, issue) — hard failures, never processed
+    warnings = []      # (filename, warning) — processed anyway, but flagged
     to_process = []  # (path, metadata, is_update)
 
     for path in pdf_files:
@@ -145,6 +186,13 @@ def scan_folder(folder: Path, engine: str = "voyage"):
         if metadata is None:
             unmatched.append(path.name)
             continue
+
+        is_valid, issue = validate_pdf(path)
+        if not is_valid:
+            invalid.append((path.name, issue))
+            continue
+        if issue:  # valid but with a warning (e.g. no text layer)
+            warnings.append((path.name, issue))
 
         current_hash = file_hash(path)
         prior = manifest.get(path.name)
@@ -159,9 +207,17 @@ def scan_folder(folder: Path, engine: str = "voyage"):
     print(f"  {len(unchanged)} unchanged — skipped")
     print(f"  {len(to_process)} new or changed — will process")
     if unmatched:
-        print(f"  {len(unmatched)} did NOT match naming convention — skipped, not guessed at:")
+        print(f"\n  {len(unmatched)} did NOT match naming convention — skipped, not guessed at:")
         for name in unmatched:
             print(f"    - {name}")
+    if invalid:
+        print(f"\n  {len(invalid)} FAILED validation — skipped, need attention:")
+        for name, issue in invalid:
+            print(f"    - {name}: {issue}")
+    if warnings:
+        print(f"\n  {len(warnings)} processed with a warning — check these:")
+        for name, warning in warnings:
+            print(f"    - {name}: {warning}")
 
     if not to_process:
         print("\nNothing to do.")
@@ -175,55 +231,77 @@ def scan_folder(folder: Path, engine: str = "voyage"):
     collection = client.get_or_create_collection(COLLECTION_NAME, embedding_function=embedder)
 
     new_chunk_count = 0
+    failed_during_processing = []
+
     for path, metadata, is_update in to_process:
         action = "Updating" if is_update else "Adding"
         print(f"\n{action}: {path.name}")
 
-        # If this file was seen before with different content, remove its
-        # old chunks first — from chunks.jsonl AND from the embedded index —
-        # so no stale data lingers under a changed revision.
-        if is_update:
-            old_chunk_ids = manifest[path.name]["chunk_ids"]
-            chunks = [c for c in chunks if c["chunk_id"] not in old_chunk_ids]
-            try:
-                collection.delete(ids=old_chunk_ids)
-            except Exception:
-                pass  # ids may not all exist if index was rebuilt separately; safe to ignore
-            print(f"  Removed {len(old_chunk_ids)} old chunks (superseded revision)")
+        try:
+            # If this file was seen before with different content, remove its
+            # old chunks first — from chunks.jsonl AND from the embedded index —
+            # so no stale data lingers under a changed revision.
+            if is_update:
+                old_chunk_ids = manifest[path.name]["chunk_ids"]
+                chunks = [c for c in chunks if c["chunk_id"] not in old_chunk_ids]
+                try:
+                    collection.delete(ids=old_chunk_ids)
+                except Exception:
+                    pass  # ids may not all exist if index was rebuilt separately; safe to ignore
+                print(f"  Removed {len(old_chunk_ids)} old chunks (superseded revision)")
 
-        file_chunks = chunk_document(path, metadata)
-        text_chunks = [c for c in file_chunks if c.has_text_layer and c.text.strip()]
+            file_chunks = chunk_document(path, metadata)
+            text_chunks = [c for c in file_chunks if c.has_text_layer and c.text.strip()]
 
-        if text_chunks:
-            collection.add(
-                ids=[c.chunk_id for c in text_chunks],
-                documents=[c.text for c in text_chunks],
-                metadatas=[{
-                    "document_title": c.document_title,
-                    "revision": c.revision,
-                    "page_number": c.page_number,
-                    "equipment_model": c.equipment_model,
-                    "document_type": c.document_type,
-                    "source_file": c.source_file,
-                } for c in text_chunks],
-            )
+            if text_chunks:
+                collection.add(
+                    ids=[c.chunk_id for c in text_chunks],
+                    documents=[c.text for c in text_chunks],
+                    metadatas=[{
+                        "document_title": c.document_title,
+                        "revision": c.revision,
+                        "page_number": c.page_number,
+                        "equipment_model": c.equipment_model,
+                        "document_type": c.document_type,
+                        "source_file": c.source_file,
+                    } for c in text_chunks],
+                )
 
-        from dataclasses import asdict
-        new_chunks = [asdict(c) for c in file_chunks]
-        chunks.extend(new_chunks)
-        new_chunk_count += len(file_chunks)
+            new_chunks = [asdict(c) for c in file_chunks]
+            chunks.extend(new_chunks)
+            new_chunk_count += len(file_chunks)
 
-        manifest[path.name] = {
-            "hash": file_hash(path),
-            "chunk_ids": [c.chunk_id for c in file_chunks],
-        }
-        print(f"  {len(file_chunks)} chunks ({len(text_chunks)} embedded, "
-              f"{len(file_chunks) - len(text_chunks)} metadata-only — no text layer)")
+            manifest[path.name] = {
+                "hash": file_hash(path),
+                "chunk_ids": [c.chunk_id for c in file_chunks],
+            }
+            print(f"  {len(file_chunks)} chunks ({len(text_chunks)} embedded, "
+                  f"{len(file_chunks) - len(text_chunks)} metadata-only — no text layer)")
+
+        except Exception as e:
+            # One bad file should never take down the whole batch. Report
+            # it clearly and keep going — better to process 19 of 20 TMs
+            # and flag the 1 problem than to fail silently or abort everything.
+            print(f"  FAILED: {type(e).__name__}: {e}")
+            failed_during_processing.append((path.name, str(e)))
+            continue
 
     save_chunks(chunks)
     save_manifest(manifest)
-    print(f"\nDone. {new_chunk_count} chunks added/updated across {len(to_process)} file(s). "
+    print(f"\nDone. {new_chunk_count} chunks added/updated across "
+          f"{len(to_process) - len(failed_during_processing)} file(s). "
           f"{len(unchanged)} file(s) untouched.")
+
+    if failed_during_processing:
+        print(f"\n{len(failed_during_processing)} file(s) FAILED during processing "
+              f"(not added to the index):")
+        for name, err in failed_during_processing:
+            print(f"  - {name}: {err}")
+
+    total_issues = len(unmatched) + len(invalid) + len(failed_during_processing)
+    if total_issues:
+        print(f"\n{total_issues} file(s) need your attention — see above. "
+              f"Nothing else in the library was affected.")
 
 
 if __name__ == "__main__":
