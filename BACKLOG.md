@@ -53,24 +53,17 @@ was actually called, not at import time). Fixed by listing all four.
 ## Dense spec table result — flange-bolt torque table did NOT get lost
 
 **What:** The GEWES manual's Tab. 1 (flange bolting torque, 16 rows × 8
-columns, page 16) is structurally the same kind of dense numeric table flagged
-as the top-priority backlog item below (MPC 800A's temperature table). Live
-query: "What is the tightening torque for the flange bolts?"
+columns, page 16) is structurally the same kind of dense numeric table that
+originally motivated the priority fix below. Live query: "What is the
+tightening torque for the flange bolts?"
 
 **Result:** Retrieval + Claude correctly returned the **full table**, matched
-each torque value to the correct flange diameter, and cited both source pages
-accurately. This contradicts the concern that dense tables reliably get lost
-in page-level chunks.
-
-**Why deferred / not yet conclusive:** One clean result on one table isn't
-enough to close the priority item below — the MPC 800A case that originally
-surfaced the problem mixes many different kinds of values (temperatures,
-frequencies, voltages, standard numbers) in one chunk, which may be a harder
-case than a table of visually uniform numeric rows like this one. Worth
-noting as a real data point, not proof the underlying issue is resolved.
-Still recommend running the original MPC 800A temperature-range query again
-for a direct before/after comparison, and testing against more of Jared's
-denser TMs once they're loaded for real.
+each torque value to the correct flange diameter, and cited both source
+pages accurately — even before the table-aware chunking fix existed. Useful
+signal that uniform numeric tables were less at-risk than the MPC 800A case,
+which mixes many different kinds of values (temperatures, frequencies,
+voltages, standard numbers) in one chunk. See the resolved entry below for
+the conclusive fix and live confirmation against the actual MPC 800A case.
 
 ---
 
@@ -151,16 +144,11 @@ at least *surface* the right drawing even without pulling text from it.
 
 ---
 
-## 🔺 PRIORITY — Dense spec tables get lost in page-level chunks
+## ✅ RESOLVED — Dense spec tables get lost in page-level chunks
 
-**Elevated (Aug 2026):** Dave confirms many TMs in the full drivetrain
-library have tables more complex/dense than this prototype's examples.
-This is no longer a corner case worth fixing eventually — it's likely
-closer to core reliability, and should be the top priority once the
-current session's testing wraps up. Recommended sequencing: fix this
-before building any front end (see `docs/architecture.md`), since a
-polished interface over an unreliable table-reading system would be worse
-than no interface at all.
+**Elevated (Aug 2026):** Dave confirmed many TMs in the full drivetrain
+library have tables more complex/dense than this prototype's examples —
+no longer a corner case, made top priority ahead of front-end work.
 
 **What:** Tested query "what is the operating temperature range for the
 central unit" against the real MPC 800A manual. The correct answer (0–50°C)
@@ -171,14 +159,28 @@ the Central Unit instead.
 tests + EMC tests all together) collapsed into a single text chunk. The word
 "temperature" is one hit among dozens of other equally-rare terms (kHz, dB,
 VDC, IEC standard numbers) in that same chunk, so it doesn't stand out enough
-to rank highly — with either the TF-IDF placeholder or, likely, with a real
-embedding model too, since the problem is chunk granularity, not just the
-embedding method.
+to rank highly — with either the TF-IDF placeholder or a real embedding
+model, since the problem is chunk granularity, not the embedding method.
 
-**Path to fixing it:** Table-aware chunking — detect table regions (e.g. via
-pdfplumber's table extraction, which returns row/column structure) and split
-dense multi-row tables into smaller chunks (per table, or per few rows)
-rather than lumping a whole table-heavy page into one chunk.
+**Fix (Aug 2026):** Table-aware chunking added to `parse_and_chunk.py`.
+Tables with more than 8 data rows (`TABLE_ROW_THRESHOLD`) now also get
+split into standalone sub-chunks of 6 rows each (`TABLE_ROW_GROUP_SIZE`),
+each with the header row repeated for column-label context and a note
+identifying which page/table/row-range it came from — in addition to the
+existing full-page chunk, not replacing it. Smaller tables are left as-is.
+
+**Verified two ways:**
+1. In sandbox testing against the real GEWES manual's 16-row flange-bolt
+   torque table: correctly split into 3 labeled sub-chunks (rows 1-6, 7-12,
+   13-16), while the smaller 6-row bilingual maintenance-interval table on
+   an earlier page was correctly left untouched. Full 4-document test run
+   showed no regressions.
+2. **Live, conclusive fix confirmed on Dave's machine (Aug 2026):** full
+   reindex of all 14 real TMs, then re-ran the *exact* original failing
+   query. Result: `"0 – 50°C ... Sources: PropulsionControl - BergPropulsion
+   MPC800A O&M Manual, RevA, p. 10"` — correct answer, correct citation.
+   This is the first live proof this specific, long-standing priority item
+   is actually fixed, not just theoretically addressed.
 
 ---
 
