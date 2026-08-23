@@ -32,11 +32,12 @@ part numbers, and specs vary by manufacturer and model.
 Rules:
 - If the excerpts don't contain enough information to answer, say so plainly \
 rather than guessing or filling gaps with general knowledge.
-- Every claim in your answer must be traceable to one of the excerpts. \
-End with a "Sources:" line listing exactly which excerpts you used, in the \
-format: [Document Title], [Revision], p. [Page Number].
+- Every claim in your answer must be traceable to one of the excerpts.
 - Be concise and procedural — the reader is a working engineer, not someone \
 who wants prose. Use numbered steps when the excerpt describes a procedure.
+- Do not include a "Sources" list in your answer — the application displays \
+sources separately, generated directly from the actual retrieved excerpts \
+rather than from your own summary of them.
 """
 
 
@@ -104,6 +105,25 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 3,
     }
 
 
+def format_sources(chunks: list[dict]) -> str:
+    """Clean, code-generated citation list — document + revision + page
+    only, no raw excerpt text. Built directly from retrieval metadata
+    (not from Claude's own summary of it), so it's independently accurate
+    rather than dependent on the model reliably reformatting it every time.
+    Used by both the CLI and the Streamlit front end so citations look and
+    behave identically in both places."""
+    lines = []
+    seen = set()
+    for c in chunks:
+        m = c["metadata"]
+        key = (m["document_title"], m["revision"], m["page_number"])
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(f'- {m["document_title"]}, {m["revision"]}, p. {m["page_number"]}')
+    return "Sources:\n" + "\n".join(lines) if lines else ""
+
+
 def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: int = 3):
     """CLI-facing wrapper — keeps the exact command-line behavior/UX
     unchanged (dry-run printing, sys.exit on a missing key) while
@@ -123,6 +143,9 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
         sys.exit(str(e))
 
     print(result["answer"])
+    sources = format_sources(result["chunks"])
+    if sources:
+        print(f"\n{sources}")
 
 
 if __name__ == "__main__":

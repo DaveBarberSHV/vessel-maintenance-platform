@@ -5,3 +5,4 @@ __pycache__/
 chroma_db/
 manifest.json
 .env
+.streamlit/secrets.toml

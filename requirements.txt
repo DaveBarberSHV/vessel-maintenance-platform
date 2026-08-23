@@ -1,0 +1,8 @@
+# Dependencies for app.py (the Streamlit front end) only.
+# Ingestion (scan_folder.py, parse_and_chunk.py) has its own separate
+# requirements file — see ingestion/requirements.txt — since ingestion
+# stays a Dave-run local process, not part of the deployed app.
+streamlit
+chromadb
+voyageai
+anthropic
