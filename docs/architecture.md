@@ -16,28 +16,40 @@ flowchart LR
     C --> D["✅ Vector store<br/>Chroma DB"]
 ```
 
-- **Google Drive** — shared folder, organized by drivetrain system, with the
-  naming convention in `docs/naming_convention.md` *(create this if we
-  formalize it further)*. No live connector exists yet — see `BACKLOG.md`.
-  Files are uploaded here by hand, then manually pulled in for ingestion runs.
+- **Google Drive** — real shared folder now in active use (`Drivetrain TMs`),
+  not just a plan. Naming convention (`[System]_[Manufacturer]_[Model]_[DocType]_Rev[X].pdf`,
+  see `docs/tm_upload_checklist.md`) now includes `DWG` (renamed from the
+  original `GADrawing`) and a new `RefData` catch-all doc type for reports,
+  inspections, and other reference material that doesn't fit the other
+  categories. No live connector exists yet — see `BACKLOG.md`. Files are
+  uploaded here by hand, then pulled in via `scan_folder.py`.
 - **Parse & chunk** — `ingestion/parse_and_chunk.py` + `ingestion/table_extraction.py`.
-  Genuine PDFs now get structured table extraction (recovers marker/checkbox
+  Genuine PDFs get structured table extraction (recovers marker/checkbox
   cells that plain text loses — verified fix, see `BACKLOG.md`), not just
-  plain text. Known gap: drawings with no text layer (see `BACKLOG.md`) get
-  metadata-only treatment, no searchable text chunk. **Process note:** table
-  recovery needs genuine PDF bytes — files only added to Project knowledge
-  (not uploaded directly to chat) get converted to a preview format that
-  can't support this; upload real PDFs directly when ingesting.
+  plain text. Chunk IDs are now derived from the filename itself (fixed
+  Aug 2026 — the old scheme, based on doc-type + equipment model, could
+  silently collide across multiple files sharing both, e.g. several
+  `RefData` reports for the same part — see `BACKLOG.md`). Known gap:
+  drawings/scans with no text layer get metadata-only treatment, no
+  searchable text chunk — currently true for 5 of the library's 14 files
+  (the original thruster GA drawing and 4 single-page balancing-report
+  scans; see `BACKLOG.md`'s OCR entry).
 - **Embed chunks** — `ingestion/retrieval.py`. Real semantic embeddings via
-  Voyage AI (Anthropic's embedding partner) are now the default engine,
-  live-tested successfully (Aug 2026) — see `BACKLOG.md`'s resolved TF-IDF
-  entry for the side-by-side proof. TF-IDF remains available via
-  `--engine tfidf` for offline testing without an API key.
-- **Vector store** — Chroma, embedded directly in the pipeline. One module
-  now manages both engines, each in its own subfolder
-  (`chroma_db/voyage/`, `chroma_db/tfidf/`) so they never collide —
-  consolidated from two separate scripts on Aug 2026, ahead of the ~20
-  additional TMs expected from Jared.
+  Voyage AI are the default engine, live-tested successfully both in earlier
+  sandbox testing and — as of Aug 2026 — in a real run on Dave's own
+  machine. TF-IDF remains available via `--engine tfidf` for offline
+  testing without an API key.
+- **Vector store** — Chroma, embedded directly in the pipeline. **First real,
+  persistent (non-sandbox) ingestion happened Aug 2026**: all three original
+  project TMs plus Jared's initial batch of 8, plus one bilingual German/English
+  TM added as an ingestion test — 14 files, 155 chunks total — are now live
+  in Dave's local Chroma index via `scan_folder.py`. This is also the first
+  live proof that `scan_folder.py`'s `collection.add()`/`delete()` path
+  (previously only unit-tested, see resolved backlog entry) works correctly
+  end-to-end. One real bug was caught and fixed in this run: renaming an
+  already-ingested file (without also updating the tracking manifest)
+  created a silent duplicate — see `BACKLOG.md` for the fix and the still-open
+  gap (rename detection isn't built into `scan_folder.py` yet).
 
 ## Query time (engineer asks a question, gets a cited answer)
 
@@ -49,30 +61,37 @@ flowchart LR
 ```
 
 - **Vector search** — same Chroma store from ingestion, now backed by real
-  Voyage embeddings. Live-tested with a hard, broad diagnostic question
-  ("My propulsion equipment has shut down") that TF-IDF completely missed;
-  Voyage correctly found and cited both relevant pages across both manuals,
-  verified accurate against the source text. See `BACKLOG.md`.
+  Voyage embeddings over the full 14-document library. Live-tested with a
+  hard, broad diagnostic question ("My propulsion equipment has shut down")
+  that TF-IDF completely missed but Voyage found correctly (see `BACKLOG.md`),
+  and — as of Aug 2026 — with real queries against the newly-ingested GEWES
+  manual, including one that correctly pulled a full 16-row torque table and
+  matched the right value to the right flange size. That result is a
+  positive data point against the "dense tables get lost" concern flagged
+  as a priority backlog item, though not yet conclusive — see `BACKLOG.md`.
 - **Claude API** — `ingestion/answer_query.py`. Builds a prompt from
   retrieved excerpts, instructs Claude to answer only from those excerpts,
-  and to cite document + revision + page. **Live-tested successfully
-  (Aug 2026)** — correctly synthesized a multi-page procedure and honestly
-  flagged a missing revision number rather than guessing at one.
+  and to cite document + revision + page. Live-tested successfully,
+  including correctly synthesizing an answer that drew on two different
+  source documents at once (an O&M manual and a service bulletin) with
+  accurate separate citations for each.
 
 ## Not yet on this diagram (known future moves)
 
 - **A front end.** Deliberately not started — right now every component is
-  a script you and Dave run by hand and inspect closely, which is exactly
-  how real bugs (TF-IDF's blind spot, the checkbox-table risk) got caught.
-  A polished interface in front of a system with known accuracy gaps would
-  look more trustworthy than it is. Priority order: fix table extraction
-  first (see `BACKLOG.md` — this matters more than initially scoped, since
-  the full TM library is expected to have denser, more complex tables than
-  the prototype set), then build a front end once retrieval accuracy is
-  something the whole engineering department could rely on.
-- A real hosted backend (this whole pipeline currently lives in a chat
-  sandbox, not a deployed service)
+  a script Dave runs by hand and inspects closely, which is exactly how
+  real bugs (TF-IDF's blind spot, the checkbox-table risk, and the
+  rename-duplication bug) got caught. A polished interface in front of a
+  system with known gaps would look more trustworthy than it is. Priority
+  order: fix table extraction (still top-priority per `BACKLOG.md`, pending
+  more evidence one way or the other) and rename detection, then build a
+  front end once retrieval accuracy is something the whole engineering
+  department could rely on.
+- A real hosted backend (this whole pipeline currently runs from Dave's
+  own machine via command line, not a deployed service)
 - A live Google Drive connector, if/when one becomes available
+- OCR/vision-based extraction for scanned reference docs and drawings —
+  5 of the current 14 files have no searchable text (see `BACKLOG.md`)
 - Anything supporting more than one vessel or more than a couple of testers
 
 See `BACKLOG.md` for the reasoning behind each deferred item, and
