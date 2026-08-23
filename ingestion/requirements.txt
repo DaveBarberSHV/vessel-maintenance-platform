@@ -1,1 +1,4 @@
 pdfplumber
+chromadb
+voyageai
+anthropic
