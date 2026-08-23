@@ -70,10 +70,15 @@ def db_path(engine: str) -> Path:
 def get_voyage_key() -> str:
     key = os.environ.get("VOYAGE_API_KEY")
     if not key:
-        sys.exit(
-            "No VOYAGE_API_KEY environment variable found.\n"
-            "Set it first: export VOYAGE_API_KEY=\"your-key-here\"\n"
-            "Get a key at https://dash.voyageai.com"
+        # Raises rather than sys.exit()s — this function is called from
+        # query_chunks(), which is imported directly by the Streamlit front
+        # end (via answer_query.get_answer()). sys.exit() there would kill
+        # the whole running app process for every user, not just report an
+        # error for one request. CLI callers below catch this and preserve
+        # the original clean-error behavior.
+        raise ValueError(
+            "No VOYAGE_API_KEY available. Set the VOYAGE_API_KEY "
+            "environment variable. Get a key at https://dash.voyageai.com"
         )
     return key
 
@@ -173,7 +178,9 @@ def query_chunks(question: str, engine: str = "voyage", top_k: int = 3) -> list[
             vectorizer = pickle.load(f)
         embedder = TfidfEmbedder(vectorizer)
     else:
-        sys.exit(f"Unknown engine '{engine}'. Use 'voyage' or 'tfidf'.")
+        # Same reasoning as get_voyage_key() above — this function is
+        # imported directly by the front end, so no sys.exit() here.
+        raise ValueError(f"Unknown engine '{engine}'. Use 'voyage' or 'tfidf'.")
 
     client = chromadb.PersistentClient(path=str(path))
     collection = client.get_collection(COLLECTION_NAME, embedding_function=embedder)
@@ -209,11 +216,17 @@ if __name__ == "__main__":
 
     if not args:
         sys.exit('Usage: python retrieval.py [build|query "question"] [--engine voyage|tfidf]')
-    if args[0] == "build":
-        build_collection(engine=engine)
-    elif args[0] == "query":
-        if len(args) < 2:
-            sys.exit('Usage: python retrieval.py query "your question" [--engine voyage|tfidf]')
-        query(args[1], engine=engine)
-    else:
-        sys.exit("Unknown command. Use 'build' or 'query'.")
+    try:
+        if args[0] == "build":
+            build_collection(engine=engine)
+        elif args[0] == "query":
+            if len(args) < 2:
+                sys.exit('Usage: python retrieval.py query "your question" [--engine voyage|tfidf]')
+            query(args[1], engine=engine)
+        else:
+            sys.exit("Unknown command. Use 'build' or 'query'.")
+    except ValueError as e:
+        # get_voyage_key() / query_chunks() now raise instead of sys.exit()
+        # (needed so they're safely importable by the Streamlit front end)
+        # — this preserves the original clean one-line CLI error behavior.
+        sys.exit(str(e))

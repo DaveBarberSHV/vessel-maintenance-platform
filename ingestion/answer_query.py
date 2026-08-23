@@ -55,34 +55,74 @@ Manual excerpts retrieved for this question:
 Answer the question using only the excerpts above."""
 
 
-def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: int = 3):
+def get_answer(question: str, engine: str = "voyage", top_k: int = 3,
+               api_key: str | None = None) -> dict:
+    """The importable core of this module — used by both the CLI below and
+    the Streamlit front end. Returns a dict rather than printing, and
+    raises a normal exception rather than sys.exit()-ing, since this now
+    needs to run safely inside a long-lived app process, not just as a
+    one-shot script.
+
+    Returns:
+        {
+            "answer": str,        # Claude's synthesized response text
+            "chunks": list[dict], # raw retrieved chunks (metadata + excerpt
+                                   # text) used to build the prompt — the
+                                   # front end shows these inline next to
+                                   # citations, not just a page number, per
+                                   # docs/architecture.md
+            "prompt": str,        # the actual prompt sent (useful for a
+                                   # debug/dry-run view later)
+        }
+
+    Raises:
+        ValueError if no Anthropic API key is available.
+    """
     chunks = query_chunks(question, engine=engine, top_k=top_k)
     prompt = build_prompt(question, chunks)
 
-    if dry_run:
-        print("=== SYSTEM PROMPT ===")
-        print(SYSTEM_PROMPT)
-        print("\n=== USER PROMPT (what would be sent) ===")
-        print(prompt)
-        return
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        sys.exit(
-            "No ANTHROPIC_API_KEY environment variable found.\n"
-            "Set it first: export ANTHROPIC_API_KEY=\"your-key-here\"\n"
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise ValueError(
+            "No ANTHROPIC_API_KEY available. Set the ANTHROPIC_API_KEY "
+            "environment variable, or pass api_key= explicitly. "
             "Get a key at https://console.anthropic.com"
         )
 
     import anthropic
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=key)
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1000,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
     )
-    print(response.content[0].text)
+    return {
+        "answer": response.content[0].text,
+        "chunks": chunks,
+        "prompt": prompt,
+    }
+
+
+def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: int = 3):
+    """CLI-facing wrapper — keeps the exact command-line behavior/UX
+    unchanged (dry-run printing, sys.exit on a missing key) while
+    delegating the real work to get_answer()."""
+    if dry_run:
+        chunks = query_chunks(question, engine=engine, top_k=top_k)
+        prompt = build_prompt(question, chunks)
+        print("=== SYSTEM PROMPT ===")
+        print(SYSTEM_PROMPT)
+        print("\n=== USER PROMPT (what would be sent) ===")
+        print(prompt)
+        return
+
+    try:
+        result = get_answer(question, engine=engine, top_k=top_k)
+    except ValueError as e:
+        sys.exit(str(e))
+
+    print(result["answer"])
 
 
 if __name__ == "__main__":

@@ -341,4 +341,10 @@ if __name__ == "__main__":
         del args[idx:idx + 2]
     if not args:
         sys.exit("Usage: python scan_folder.py /path/to/TM/folder [--engine voyage|tfidf]")
-    scan_folder(Path(args[0]), engine=engine)
+    try:
+        scan_folder(Path(args[0]), engine=engine)
+    except ValueError as e:
+        # get_voyage_key() (via get_embedder()) now raises instead of
+        # sys.exit() — see retrieval.py for why. This preserves the
+        # original clean one-line CLI error behavior here too.
+        sys.exit(str(e))
