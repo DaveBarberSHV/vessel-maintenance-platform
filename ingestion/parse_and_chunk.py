@@ -146,7 +146,7 @@ DOCS = [
         },
     },
     {
-        "path": Path("/mnt/user-data/uploads/CardanShafts_Gewes_All_OMM_Rev3-2012.pdf"),
+        "path": Path("/path/to/your/local/TM-folder/CardanShafts_Gewes_All_OMM_Rev3.pdf"),
         "metadata": {
             "vessel": "Master Boat Builders Hull 469 (tug+barge combo)",
             "order_no": "7396A1",
@@ -154,7 +154,7 @@ DOCS = [
             "document_type": "O&M Manual",
             "document_title": "Einbau-Wartungs- und Lagervorschrift fur Gelenkwellen / "
                                "Recommendations for Installation, Maintenance and Storage of Cardan Shafts (bilingual DE/EN)",
-            "revision": "Edition 03/2012 (13.03.2012) - confirmed from cover page, matches filename Rev3-2012",
+            "revision": "Edition 03/2012 (13.03.2012) - confirmed from cover page, matches filename",
         },
     },
 ]
