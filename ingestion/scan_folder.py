@@ -58,10 +58,11 @@ FILENAME_PATTERN = re.compile(
 
 DOCTYPE_LABELS = {
     "OMM": "O&M Manual",
-    "GADRAWING": "General Arrangement Drawing",
+    "DWG": "General Arrangement Drawing",
     "PARTSLIST": "Parts List",
     "SERVICEBULLETIN": "Service Bulletin",
     "WIRINGDIAGRAM": "Wiring Diagram",
+    "REFDATA": "Reference Data",
 }
 
 

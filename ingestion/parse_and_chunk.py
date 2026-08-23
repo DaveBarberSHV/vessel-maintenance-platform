@@ -90,12 +90,18 @@ def detect_section(text: str) -> str | None:
 
 
 def chunk_document(path: Path, metadata: dict) -> list[Chunk]:
+    # chunk_id is derived from the actual filename (guaranteed unique under
+    # the naming convention) + page number — NOT from document_type +
+    # equipment_model, which can collide across multiple files that share
+    # the same doctype/model (e.g. several RefData reports for one part).
+    # See BACKLOG.md for the case that surfaced this.
+    file_stem = re.sub(r"[^A-Za-z0-9]+", "_", path.stem)
     pages = extract_pages(path)
     chunks = []
     for page_number, text in pages:
         section = detect_section(text)
         chunks.append(Chunk(
-            chunk_id=f"{metadata['document_type']}-{metadata['equipment_model']}-p{page_number}".replace(" ", "_"),
+            chunk_id=f"{file_stem}-p{page_number}",
             text=text.strip(),
             vessel=metadata["vessel"],
             order_no=metadata["order_no"],

@@ -27,8 +27,11 @@ than silently causing a problem later.
   - Manufacturer and Model should be one "word" each — if the real name
     has multiple words or a space (e.g. "Twin Disc"), squash it together
     instead: `TwinDisc`, not `Twin_Disc` or `Twin Disc`.
-  - DocType should be one of: `OMM`, `GADrawing`, `PartsList`,
-    `ServiceBulletin`, `WiringDiagram` (ask if you need a new one added).
+  - DocType should be one of: `OMM`, `DWG`, `PartsList`,
+    `ServiceBulletin`, `WiringDiagram`, `RefData` (ask if you need a new one
+    added). Use `RefData` as the catch-all for reference material that
+    doesn't fit the other categories — reports, inspections, survey results,
+    or other general reference information for a system.
   - If there's genuinely no revision marked anywhere in the document,
     use `RevUnknown` rather than leaving it out.
 
