@@ -74,6 +74,43 @@ denser TMs once they're loaded for real.
 
 ---
 
+## `scan_folder.py` doesn't detect renamed files — creates silent duplicates
+
+**What happened (Aug 2026):** The GEWES cardan shaft manual was renamed from
+`CardanShafts_Gewes_All_OMM_Rev3.pdf` to `Shafting_Gewes_CardanShafts_OMM_Rev3.pdf`
+as part of a broader naming-convention cleanup (adding `DWG`/`RefData` doc
+types). The file's *content* didn't change — only its name. Re-running
+`scan_folder.py` did not recognize this as the same document.
+
+**Why:** `manifest.json` (and therefore all change-detection) is keyed by
+exact filename, not by file content hash alone. A rename looks identical to
+"a brand new file that happens to have similar content" — there's no logic
+that compares content across different filenames to catch this case. Result:
+the old chunks stayed in Chroma/`chunks.jsonl` untouched (never flagged as
+stale, since their filename key was simply absent from the new scan), while
+a second, fully duplicate set of chunks was added under the new name and a
+new chunk-ID scheme. 20 chunks became 40 for the same physical document.
+
+**How it was caught:** Reading `scan_folder.py`'s own summary output
+carefully — it reported "0 unchanged, 14 new or changed" when 1 of those 14
+should have been recognized as already-indexed. Caught before running any
+real queries against the corrupted index.
+
+**Fixed for this instance:** One-off cleanup removed the 20 stale chunks
+under the old filename from Chroma, `chunks.jsonl`, and `manifest.json`,
+leaving the correctly-tagged new-filename version intact.
+
+**Path to fixing properly:** `scan_folder.py` needs rename detection —
+e.g. hash every file first, and if a hash exists in the manifest under a
+*different* filename than the one currently being scanned, treat it as a
+rename (update the filename key, keep or refresh the chunk IDs) rather than
+silently leaving the old entry orphaned while adding a new one. Until fixed,
+**renaming a file in the TM library requires a manual cleanup pass** —
+worth a note in `docs/tm_upload_checklist.md` warning against renaming
+already-ingested files without also running a cleanup step.
+
+---
+
 ## Citation precision: page-level → section-level
 
 **What:** Citations currently resolve to `document + revision + page number`
