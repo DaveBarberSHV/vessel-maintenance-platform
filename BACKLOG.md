@@ -5,6 +5,75 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## ✅ RESOLVED — First real (non-sandbox) ingestion run: GEWES bilingual cardan shaft manual
+
+**What it was:** All prior testing (TF-IDF vs. Voyage comparison, checkbox-table
+fix, etc.) ran inside Claude's chat sandbox — ephemeral, never persisted to a
+real database anywhere. This was the first time `scan_folder.py` ran against
+Dave's own machine with a real local Chroma index and a live Voyage key.
+
+**What got tested (Aug 2026):** Added `CardanShafts_Gewes_All_OMM_Rev3.pdf` —
+a 20-page bilingual German/English manual — via `scan_folder.py`, pointed at a
+folder containing only that one file.
+
+**Results:**
+- All 20 pages had a real text layer; 20/20 chunks embedded (0 metadata-only).
+- Bilingual German/English prose extracts cleanly in correct reading order —
+  pdfplumber's default position-based sort naturally interleaves
+  German-sentence/English-sentence pairs since both columns sit at matching
+  vertical positions on the page. No special-casing needed for bilingual docs.
+- Revision confirmed from the actual cover page ("Edition 03/2012, 13.03.2012"),
+  not inferred from the filename.
+- `answer_query.py` correctly answered a grease-spec question (citing p.10)
+  and a flange-bolt-torque question — the latter pulled the **entire 16-row
+  torque table** and matched the correct torque to the correct flange size,
+  citing both source pages.
+- This is the first live proof that `scan_folder.py`'s `collection.add()` path
+  (previously untested outside the hash-logic unit test — see the still-open
+  entry below) works correctly end-to-end against a real Voyage-backed Chroma
+  index.
+
+**Important side-effect worth knowing:** the original three TMs (MPC 800A,
+MCH6, azimuth thruster) have only ever been tested inside the ephemeral chat
+sandbox — they were never run through `scan_folder.py` and are **not yet in
+any real, persistent database**. Dave's local Chroma index currently contains
+only the GEWES manual's 20 chunks. Folding the original three in for real is
+still an open task (see discussion in project chat, Aug 2026) — they need the
+same naming-convention rename + `scan_folder.py` treatment as any new TM,
+not a special case.
+
+**Also surfaced and fixed in this pass:** `ingestion/requirements.txt` only
+listed `pdfplumber` — `chromadb`, `voyageai`, and `anthropic` were all missing
+(their imports are inline inside functions in `retrieval.py` and
+`answer_query.py`, so `ModuleNotFoundError` only surfaced at the moment each
+was actually called, not at import time). Fixed by listing all four.
+
+---
+
+## Dense spec table result — flange-bolt torque table did NOT get lost
+
+**What:** The GEWES manual's Tab. 1 (flange bolting torque, 16 rows × 8
+columns, page 16) is structurally the same kind of dense numeric table flagged
+as the top-priority backlog item below (MPC 800A's temperature table). Live
+query: "What is the tightening torque for the flange bolts?"
+
+**Result:** Retrieval + Claude correctly returned the **full table**, matched
+each torque value to the correct flange diameter, and cited both source pages
+accurately. This contradicts the concern that dense tables reliably get lost
+in page-level chunks.
+
+**Why deferred / not yet conclusive:** One clean result on one table isn't
+enough to close the priority item below — the MPC 800A case that originally
+surfaced the problem mixes many different kinds of values (temperatures,
+frequencies, voltages, standard numbers) in one chunk, which may be a harder
+case than a table of visually uniform numeric rows like this one. Worth
+noting as a real data point, not proof the underlying issue is resolved.
+Still recommend running the original MPC 800A temperature-range query again
+for a direct before/after comparison, and testing against more of Jared's
+denser TMs once they're loaded for real.
+
+---
+
 ## Citation precision: page-level → section-level
 
 **What:** Citations currently resolve to `document + revision + page number`
