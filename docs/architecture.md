@@ -76,23 +76,79 @@ flowchart LR
   source documents at once (an O&M manual and a service bulletin) with
   accurate separate citations for each.
 
+## Front end + hosting (planned, Aug 2026)
+
+```mermaid
+flowchart LR
+    A["🔲 Jared/Dave<br/>Opens chat UI"] --> B["🟡 Streamlit app<br/>Chat UI + simple auth"]
+    B --> C["✅ Existing retrieval +<br/>Claude API (reused, not rebuilt)"]
+    C --> D["🟡 Supabase Postgres<br/>Persistent chat history"]
+    D --> B
+```
+
+Decided Aug 2026, now that both items blocking front-end work (table-aware
+chunking, rename detection) are resolved and live-verified.
+
+- **Framework: Streamlit.** Chosen deliberately over a separate
+  JS frontend + API backend — it's Python (same language as the whole
+  pipeline), has chat UI primitives built in, and can call
+  `retrieval.py`/`answer_query.py` logic directly as a Python import. One
+  codebase, no API layer to build or keep in sync.
+- **Auth:** a shared password plus a name selector — proportionate for two
+  users (Dave, Jared). Full accounts/OAuth deliberately deferred until
+  there's an actual need for it.
+- **Persistence: Supabase (hosted Postgres).** Chosen over a simpler
+  local-file option specifically because chat history needs to survive
+  restarts/redeploys, and because Dave flagged a planned v2 feature —
+  storing maintenance/troubleshooting field notes and findings, tied to
+  specific equipment — that's a natural fit for a real relational database,
+  not a file. Supabase specifically (over other Postgres options) because
+  it includes `pgvector`, which opens a v2 path for making those future
+  field notes semantically searchable using the same retrieval approach
+  already built and tested here — without needing new infrastructure when
+  that day comes. Chat messages will be tagged with the same equipment/
+  vessel/doc-type vocabulary already used in citations, so v2 notes can
+  link to existing identifiers rather than needing a data-model retrofit.
+- **Hosting: Streamlit Community Cloud.** Free tier, deploys straight from
+  the GitHub repo with minimal setup — deliberately the lowest-effort
+  hosting option available, appropriate for a 2-person internal tool.
+- **Ingestion stays separate from the front end.** `scan_folder.py` remains
+  a Dave-run, local, command-line process — the front end is query-only.
+  The ingestion pipeline is still hand-run and inspected closely on
+  purpose (see resolved backlog entries — that's how real bugs kept
+  getting caught), so it isn't being folded into a shared-access UI yet.
+
+**Planned v1 feature build order:**
+1. Refactor `answer_query.py`'s logic into an importable function (currently
+   a CLI-only script)
+2. Basic Streamlit chat UI calling that function directly
+3. Citations shown with the actual retrieved excerpt inline, not just a
+   page number — the highest-leverage trust-building feature identified in
+   `docs/monday_discussion_guide.md`
+4. Persistent history via Supabase, tagged by user
+5. 👍/👎 per answer, stored alongside history — keeps some of the
+   "catch bugs by inspection" visibility once answers aren't only being
+   read raw in a terminal anymore
+6. Copy button with two modes: plain answer, and answer-with-citations —
+   deliberate choice so a copied fact doesn't lose its source when pasted
+   into a maintenance log or email
+7. Deploy to Streamlit Community Cloud, live-test with Jared
+
+
+
 ## Not yet on this diagram (known future moves)
 
-- **A front end.** Deliberately not started — right now every component is
-  a script Dave runs by hand and inspects closely, which is exactly how
-  real bugs (TF-IDF's blind spot, the checkbox-table risk, and the
-  rename-duplication bug) got caught. A polished interface in front of a
-  system with known gaps would look more trustworthy than it is. Priority
-  order: fix table extraction (still top-priority per `BACKLOG.md`, pending
-  more evidence one way or the other) and rename detection, then build a
-  front end once retrieval accuracy is something the whole engineering
-  department could rely on.
-- A real hosted backend (this whole pipeline currently runs from Dave's
-  own machine via command line, not a deployed service)
 - A live Google Drive connector, if/when one becomes available
 - OCR/vision-based extraction for scanned reference docs and drawings —
   5 of the current 14 files have no searchable text (see `BACKLOG.md`)
 - Anything supporting more than one vessel or more than a couple of testers
+- **V2 idea, not yet scoped:** storing maintenance/troubleshooting field
+  notes and findings from real engineers, tied to specific equipment —
+  raised by Dave while deciding the front-end database (Aug 2026). Directly
+  influenced the choice of Supabase (Postgres + `pgvector`) over a simpler
+  option, so this remains straightforward to add later without an
+  infrastructure change. Not designed or built — just flagged so the
+  reasoning behind today's database choice doesn't get lost.
 
 See `BACKLOG.md` for the reasoning behind each deferred item, and
 `README.md` for the broader project state.
