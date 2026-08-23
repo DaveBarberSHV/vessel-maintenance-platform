@@ -42,8 +42,9 @@ class Chunk:
 
 
 def extract_pages(path: Path):
-    """Return list of (page_number, text) tuples. Tries platform container
-    format first (plain text only), falls back to pdfplumber for genuine
+    """Return list of (page_number, text, tables) tuples. Tries platform
+    container format first (plain text only, tables=[] since structure
+    recovery needs real PDF bytes), falls back to pdfplumber for genuine
     PDFs (plain text + structured table recovery)."""
     try:
         with zipfile.ZipFile(path) as z:
@@ -54,7 +55,7 @@ def extract_pages(path: Path):
                 for p in manifest["pages"]:
                     txt_path = p.get("text", {}).get("path")
                     text = z.read(txt_path).decode("utf-8", errors="replace") if txt_path else ""
-                    pages.append((p["page_number"], text))
+                    pages.append((p["page_number"], text, []))
                 return pages
     except zipfile.BadZipFile:
         pass
@@ -72,8 +73,7 @@ def extract_pages(path: Path):
                 table_blocks = "\n\n".join(render_as_markdown(t) for t in tables)
                 text = f"{text}\n\n{table_blocks}"
 
-            pages.append((i, text))
-    return pages
+            pages.append((i, text, tables))
     return pages
 
 
@@ -89,6 +89,39 @@ def detect_section(text: str) -> str | None:
     return f"{num} {title.strip()}"
 
 
+# Table-aware chunking (see BACKLOG.md, "Dense spec tables get lost in
+# page-level chunks" — the original motivating case: a page-level chunk
+# mixing many kinds of values (temperatures, voltages, standard numbers)
+# buried the one fact a query needed among dozens of equally-rare terms).
+# Tables at or below ROW_THRESHOLD data rows are left as part of the
+# page-level chunk only — they're not dense enough to cause the problem.
+# Tables above it also get split into smaller standalone chunks, each with
+# the header row repeated for column-label context, so a query can match a
+# single row (or small group of rows) directly instead of competing with
+# every other row on the page.
+TABLE_ROW_THRESHOLD = 8
+TABLE_ROW_GROUP_SIZE = 6
+
+
+def split_dense_tables(tables: list, page_number: int) -> list[str]:
+    """Return standalone chunk texts for any table on this page dense
+    enough to need splitting. Small tables are skipped here since they're
+    already fully represented in the page-level chunk."""
+    extra_chunks = []
+    for table_idx, rows in enumerate(tables, start=1):
+        if not rows:
+            continue
+        header, data_rows = rows[0], rows[1:]
+        if len(data_rows) <= TABLE_ROW_THRESHOLD:
+            continue
+        for start in range(0, len(data_rows), TABLE_ROW_GROUP_SIZE):
+            group = data_rows[start:start + TABLE_ROW_GROUP_SIZE]
+            row_range = f"rows {start + 1}-{start + len(group)} of {len(data_rows)}"
+            md = render_as_markdown([header] + group)
+            extra_chunks.append(f"(Table {table_idx} on page {page_number}, {row_range})\n\n{md}")
+    return extra_chunks
+
+
 def chunk_document(path: Path, metadata: dict) -> list[Chunk]:
     # chunk_id is derived from the actual filename (guaranteed unique under
     # the naming convention) + page number — NOT from document_type +
@@ -98,7 +131,7 @@ def chunk_document(path: Path, metadata: dict) -> list[Chunk]:
     file_stem = re.sub(r"[^A-Za-z0-9]+", "_", path.stem)
     pages = extract_pages(path)
     chunks = []
-    for page_number, text in pages:
+    for page_number, text, tables in pages:
         section = detect_section(text)
         chunks.append(Chunk(
             chunk_id=f"{file_stem}-p{page_number}",
@@ -114,6 +147,21 @@ def chunk_document(path: Path, metadata: dict) -> list[Chunk]:
             section=section,
             has_text_layer=bool(text.strip()),
         ))
+        for table_idx, extra_text in enumerate(split_dense_tables(tables, page_number), start=1):
+            chunks.append(Chunk(
+                chunk_id=f"{file_stem}-p{page_number}-densetable{table_idx}",
+                text=extra_text,
+                vessel=metadata["vessel"],
+                order_no=metadata["order_no"],
+                equipment_model=metadata["equipment_model"],
+                document_type=metadata["document_type"],
+                document_title=metadata["document_title"],
+                revision=metadata["revision"],
+                source_file=path.name,
+                page_number=page_number,
+                section=section,
+                has_text_layer=True,
+            ))
     return chunks
 
 

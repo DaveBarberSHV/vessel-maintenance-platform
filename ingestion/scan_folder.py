@@ -180,7 +180,13 @@ def scan_folder(folder: Path, engine: str = "voyage"):
     unchanged = []
     invalid = []       # (filename, issue) — hard failures, never processed
     warnings = []      # (filename, warning) — processed anyway, but flagged
-    to_process = []  # (path, metadata, is_update)
+    to_process = []  # (path, metadata, is_update, renamed_from, current_hash)
+
+    # Reverse lookup: content hash -> filename it was last seen under. Used
+    # to detect renames (same content, new filename) rather than treating
+    # a renamed file as brand new and leaving its old entry orphaned — see
+    # BACKLOG.md for the real duplication bug this caused before this fix.
+    hash_to_prior_filename = {entry["hash"]: fname for fname, entry in manifest.items()}
 
     for path in pdf_files:
         metadata = parse_filename(path.name)
@@ -202,11 +208,20 @@ def scan_folder(folder: Path, engine: str = "voyage"):
             unchanged.append(path.name)
             continue
 
-        to_process.append((path, metadata, prior is not None))
+        renamed_from = None
+        if prior is None:
+            candidate = hash_to_prior_filename.get(current_hash)
+            if candidate and candidate != path.name:
+                renamed_from = candidate
+
+        to_process.append((path, metadata, prior is not None, renamed_from, current_hash))
+
+    renamed_count = sum(1 for _, _, _, rf, _ in to_process if rf)
 
     print(f"Scanned {len(pdf_files)} PDF(s) in {folder}")
     print(f"  {len(unchanged)} unchanged — skipped")
-    print(f"  {len(to_process)} new or changed — will process")
+    print(f"  {len(to_process)} new or changed — will process"
+          + (f" ({renamed_count} of these are renames of already-indexed files)" if renamed_count else ""))
     if unmatched:
         print(f"\n  {len(unmatched)} did NOT match naming convention — skipped, not guessed at:")
         for name in unmatched:
@@ -234,22 +249,34 @@ def scan_folder(folder: Path, engine: str = "voyage"):
     new_chunk_count = 0
     failed_during_processing = []
 
-    for path, metadata, is_update in to_process:
-        action = "Updating" if is_update else "Adding"
+    for path, metadata, is_update, renamed_from, current_hash in to_process:
+        if renamed_from:
+            action = f"Renamed (was '{renamed_from}') -> "
+        elif is_update:
+            action = "Updating"
+        else:
+            action = "Adding"
         print(f"\n{action}: {path.name}")
 
         try:
-            # If this file was seen before with different content, remove its
-            # old chunks first — from chunks.jsonl AND from the embedded index —
-            # so no stale data lingers under a changed revision.
-            if is_update:
-                old_chunk_ids = manifest[path.name]["chunk_ids"]
+            # Clean up old chunks first — either because this filename was
+            # seen before with different content (is_update), or because
+            # this content was seen before under a different filename
+            # (renamed_from). Either way, the OLD chunk_ids need removing
+            # from Chroma and chunks.jsonl, and the OLD manifest key needs
+            # removing so it doesn't linger as a stale, orphaned entry.
+            old_key = renamed_from if renamed_from else (path.name if is_update else None)
+            if old_key and old_key in manifest:
+                old_chunk_ids = manifest[old_key]["chunk_ids"]
                 chunks = [c for c in chunks if c["chunk_id"] not in old_chunk_ids]
                 try:
                     collection.delete(ids=old_chunk_ids)
                 except Exception:
                     pass  # ids may not all exist if index was rebuilt separately; safe to ignore
-                print(f"  Removed {len(old_chunk_ids)} old chunks (superseded revision)")
+                reason = "renamed from" if renamed_from else "superseded revision of"
+                print(f"  Removed {len(old_chunk_ids)} old chunks ({reason} '{old_key}')")
+                if renamed_from:
+                    del manifest[old_key]
 
             file_chunks = chunk_document(path, metadata)
             text_chunks = [c for c in file_chunks if c.has_text_layer and c.text.strip()]
@@ -273,7 +300,7 @@ def scan_folder(folder: Path, engine: str = "voyage"):
             new_chunk_count += len(file_chunks)
 
             manifest[path.name] = {
-                "hash": file_hash(path),
+                "hash": current_hash,
                 "chunk_ids": [c.chunk_id for c in file_chunks],
             }
             print(f"  {len(file_chunks)} chunks ({len(text_chunks)} embedded, "

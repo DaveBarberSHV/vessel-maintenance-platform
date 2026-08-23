@@ -3,4 +3,5 @@ __pycache__/
 .venv/
 *.jsonl
 chroma_db/
+manifest.json
 .env
