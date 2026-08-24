@@ -114,11 +114,53 @@ if "conversation_id" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-for message in st.session_state.messages:
+
+def render_assistant_extras(message: dict, key_prefix: str):
+    """Sources caption, 👍/👎 feedback, and copy options — shared by both
+    historical messages (loaded from the sidebar) and the live answer
+    just generated, so they always look and behave identically.
+    key_prefix must be unique per message (message id if saved, or the
+    live index) since Streamlit widgets need stable, unique keys."""
+    chunks = message.get("chunks")
+    if chunks:
+        st.caption(format_sources(chunks).replace("\n", "  \n"))
+
+    message_id = message.get("id")
+    if db_available and message_id is not None:
+        current = message.get("feedback")
+        col1, col2, _ = st.columns([1, 1, 10])
+        with col1:
+            if st.button("👍" if current != "up" else "✅👍", key=f"{key_prefix}_up"):
+                new_value = None if current == "up" else "up"
+                try:
+                    db.set_feedback(conn, message_id, new_value)
+                    message["feedback"] = new_value
+                    st.rerun()
+                except Exception:
+                    pass
+        with col2:
+            if st.button("👎" if current != "down" else "✅👎", key=f"{key_prefix}_down"):
+                new_value = None if current == "down" else "down"
+                try:
+                    db.set_feedback(conn, message_id, new_value)
+                    message["feedback"] = new_value
+                    st.rerun()
+                except Exception:
+                    pass
+
+    with st.expander("📋 Copy"):
+        st.caption("Answer only")
+        st.code(message["content"], language=None)
+        if chunks:
+            st.caption("Answer with sources")
+            st.code(message["content"] + "\n\n" + format_sources(chunks), language=None)
+
+
+for i, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
-        if message["role"] == "assistant" and message.get("chunks"):
-            st.caption(format_sources(message["chunks"]).replace("\n", "  \n"))
+        if message["role"] == "assistant":
+            render_assistant_extras(message, key_prefix=f"hist_{message.get('id', i)}")
 
 question = st.chat_input("Ask a question about the drivetrain TMs...")
 
@@ -152,18 +194,16 @@ if question:
                 chunks = []
 
         st.markdown(answer_text)
-        if chunks:
-            st.caption(format_sources(chunks).replace("\n", "  \n"))
 
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": answer_text,
-        "chunks": chunks,
-    })
-    if db_available:
-        try:
-            db.save_message(conn, st.session_state.conversation_id,
-                             st.session_state.user_name, "assistant",
-                             answer_text, chunks=chunks)
-        except Exception:
-            pass
+        new_message = {"role": "assistant", "content": answer_text, "chunks": chunks}
+        if db_available:
+            try:
+                new_message["id"] = db.save_message(
+                    conn, st.session_state.conversation_id,
+                    st.session_state.user_name, "assistant",
+                    answer_text, chunks=chunks)
+            except Exception:
+                pass
+
+        st.session_state.messages.append(new_message)
+        render_assistant_extras(new_message, key_prefix=f"live_{new_message.get('id', len(st.session_state.messages))}")

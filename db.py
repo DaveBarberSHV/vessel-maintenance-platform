@@ -57,9 +57,10 @@ def get_connection():
 
 
 def ensure_schema(conn):
-    """CREATE TABLE IF NOT EXISTS — safe to call every time the app
-    starts. No migration system needed yet at this scale; revisit if the
-    schema needs a real change after real data exists."""
+    """CREATE TABLE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS — safe to call
+    every time the app starts. No migration system needed yet at this
+    scale; revisit if the schema needs a real change after real data
+    exists."""
     with conn.cursor() as cur:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS messages (
@@ -80,19 +81,44 @@ def ensure_schema(conn):
             CREATE INDEX IF NOT EXISTS idx_messages_user
                 ON messages (user_name, created_at DESC);
         """)
+        # Added for step 5 (👍/👎 feedback) — 'up', 'down', or NULL
+        # (no feedback given yet). ADD COLUMN IF NOT EXISTS so this is
+        # safe to run against a database that already has the table.
+        cur.execute("""
+            ALTER TABLE messages
+                ADD COLUMN IF NOT EXISTS feedback TEXT
+                CHECK (feedback IN ('up', 'down'));
+        """)
     conn.commit()
 
 
 def save_message(conn, conversation_id: str, user_name: str, role: str,
-                  content: str, chunks: list | None = None):
+                  content: str, chunks: list | None = None) -> int:
+    """Returns the new row's id — the caller (app.py) needs this to later
+    attach feedback to the specific message a thumbs-up/down was clicked
+    on."""
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO messages (conversation_id, user_name, role, content, chunks)
             VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
             """,
             (conversation_id, user_name, role, content,
              json.dumps(chunks) if chunks is not None else None),
+        )
+        new_id = cur.fetchone()[0]
+    conn.commit()
+    return new_id
+
+
+def set_feedback(conn, message_id: int, feedback: str | None):
+    """feedback is 'up', 'down', or None (clearing previously-given
+    feedback — e.g. clicking the same button again to un-set it)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE messages SET feedback = %s WHERE id = %s",
+            (feedback, message_id),
         )
     conn.commit()
 
@@ -101,7 +127,7 @@ def load_conversation(conn, conversation_id: str) -> list[dict]:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT role, content, chunks, created_at
+            SELECT id, role, content, chunks, feedback, created_at
             FROM messages
             WHERE conversation_id = %s
             ORDER BY created_at ASC, id ASC
@@ -111,9 +137,11 @@ def load_conversation(conn, conversation_id: str) -> list[dict]:
         rows = cur.fetchall()
     return [
         {
+            "id": r["id"],
             "role": r["role"],
             "content": r["content"],
             "chunks": r["chunks"] if r["chunks"] is not None else None,
+            "feedback": r["feedback"],
         }
         for r in rows
     ]

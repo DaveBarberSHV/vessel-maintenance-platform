@@ -5,6 +5,33 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## Copy-to-clipboard is clunky on mobile (iPhone)
+
+**What:** The 📋 Copy expander (added for step 6 of the frontend build)
+uses Streamlit's built-in `st.code()` copy icon. Confirmed working on
+desktop; confirmed working but "clunky" on iPhone (Aug 2026) — exact UX
+issue not pinned down (icon visibility/tap target size most likely, given
+the icon is designed for hover-based desktop interaction).
+
+**Why not fixed now:** Works well enough for today's two-person testing
+phase, and the underlying browser clipboard API itself works fine even
+when the custom icon doesn't behave nicely — long-press-to-select still
+works as a fallback on any phone regardless.
+
+**Why it might matter more later:** `docs/monday_discussion_guide.md` has
+an open question for Jared about how he'd actually use this day-to-day —
+desk/laptop vs. phone in the engine room. If mobile turns out to be the
+primary use case rather than an edge case, this is worth revisiting with
+a custom mobile-friendly copy button rather than relying on Streamlit's
+default component.
+
+**Path to fixing it:** A small custom HTML/JS copy button (via
+`st.components.v1.html`) sized and styled for touch, instead of the
+built-in `st.code()` icon — deferred since it's extra complexity not
+justified until real usage data says it's worth it.
+
+---
+
 ## ✅ RESOLVED — First real (non-sandbox) ingestion run: GEWES bilingual cardan shaft manual
 
 **What it was:** All prior testing (TF-IDF vs. Voyage comparison, checkbox-table
