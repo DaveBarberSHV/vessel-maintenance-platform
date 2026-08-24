@@ -4,18 +4,19 @@ Vessel Maintenance TM Assistant — Streamlit chat front end.
 This is a thin UI layer only. All the real logic (retrieval, prompt
 construction, calling Claude) lives in ingestion/answer_query.py and
 ingestion/retrieval.py, unchanged — this app just imports and calls it.
-See docs/architecture.md for the full plan this fits into.
+Chat persistence lives in db.py (Supabase/Postgres). See
+docs/architecture.md for the full plan this fits into.
 
 Run locally:
-    export VOYAGE_API_KEY="..."
-    export ANTHROPIC_API_KEY="..."
+    Create .streamlit/secrets.toml with VOYAGE_API_KEY, ANTHROPIC_API_KEY,
+    and SUPABASE_DB_URL (see docs/architecture.md), or set them as plain
+    environment variables instead — both work.
     pip install -r requirements.txt
     streamlit run app.py
 
-API keys: checks Streamlit secrets first (for when this is deployed to
-Streamlit Community Cloud later), falls back to plain environment
-variables (so it runs immediately today with the same `export` commands
-already used for the CLI tools — no extra setup needed for local testing).
+"Auth" is intentionally minimal for now: a name selector (Dave/Jared) in
+the sidebar, not real accounts — appropriate for two known users; see
+docs/architecture.md for when this would need to become more.
 """
 
 import os
@@ -30,23 +31,86 @@ import streamlit as st
 # launched from.
 sys.path.insert(0, str(Path(__file__).parent / "ingestion"))
 
-for key_name in ("VOYAGE_API_KEY", "ANTHROPIC_API_KEY"):
+for key_name in ("VOYAGE_API_KEY", "ANTHROPIC_API_KEY", "SUPABASE_DB_URL"):
     if key_name not in os.environ and key_name in st.secrets:
         os.environ[key_name] = st.secrets[key_name]
 
-from answer_query import get_answer, format_sources  # noqa: E402  (must come after sys.path fix above)
+from answer_query import get_answer, format_sources  # noqa: E402
+import db  # noqa: E402
 
 st.set_page_config(page_title="Vessel Maintenance TM Assistant", page_icon="⚓")
+
+
+@st.cache_resource
+def get_db_connection():
+    """Cached so one connection is reused across reruns within the app's
+    process, rather than opening a new one on every interaction.
+    Simplification worth knowing: this is a single shared connection, fine
+    for a couple of users, not a real connection pool — revisit if this
+    ever needs to handle real concurrent load."""
+    conn = db.get_connection()
+    db.ensure_schema(conn)
+    return conn
+
+
+try:
+    conn = get_db_connection()
+    db_available = True
+except Exception as e:
+    conn = None
+    db_available = False
+    db_error = str(e)
+
 st.title("⚓ Vessel Maintenance TM Assistant")
 st.caption(
     "Ask a question about the drivetrain TMs. Answers are generated only "
-    "from the actual manual text — every answer includes the source "
-    "excerpt it came from, so you can verify it yourself."
+    "from the actual manual text, with sources listed below each answer."
 )
 
-# v1: history lives only in this browser session (resets on refresh).
-# Persistent, cross-session history via Supabase is step 4 of the planned
-# build order — see docs/architecture.md.
+if not db_available:
+    st.warning(
+        f"⚠️ Chat history isn't available right now ({db_error}). "
+        "You can still ask questions — answers just won't be saved."
+    )
+
+# --- Simple user identification (not real auth — see docs/architecture.md) ---
+if "user_name" not in st.session_state:
+    st.session_state.user_name = None
+
+with st.sidebar:
+    st.subheader("Who's asking?")
+    chosen = st.selectbox(
+        "Name", ["Select...", "Dave", "Jared"],
+        index=["Select...", "Dave", "Jared"].index(st.session_state.user_name or "Select..."),
+        label_visibility="collapsed",
+    )
+    st.session_state.user_name = None if chosen == "Select..." else chosen
+
+    if st.session_state.user_name and db_available:
+        st.divider()
+        if st.button("+ New conversation", use_container_width=True):
+            st.session_state.conversation_id = db.new_conversation_id()
+            st.session_state.messages = []
+            st.rerun()
+
+        st.caption("Past conversations")
+        try:
+            past = db.list_conversations(conn, st.session_state.user_name)
+        except Exception:
+            past = []
+        for convo in past:
+            label = convo["first_message"][:40] + ("..." if len(convo["first_message"]) > 40 else "")
+            if st.button(label, key=f"convo_{convo['conversation_id']}", use_container_width=True):
+                st.session_state.conversation_id = str(convo["conversation_id"])
+                st.session_state.messages = db.load_conversation(conn, str(convo["conversation_id"]))
+                st.rerun()
+
+if not st.session_state.user_name:
+    st.info("👋 Select your name in the sidebar to get started.")
+    st.stop()
+
+if "conversation_id" not in st.session_state:
+    st.session_state.conversation_id = db.new_conversation_id() if db_available else "local-only"
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -62,6 +126,12 @@ if question:
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.markdown(question)
+    if db_available:
+        try:
+            db.save_message(conn, st.session_state.conversation_id,
+                             st.session_state.user_name, "user", question)
+        except Exception:
+            pass  # chat still works in-session even if a save fails
 
     with st.chat_message("assistant"):
         with st.spinner("Searching the TMs..."):
@@ -90,3 +160,10 @@ if question:
         "content": answer_text,
         "chunks": chunks,
     })
+    if db_available:
+        try:
+            db.save_message(conn, st.session_state.conversation_id,
+                             st.session_state.user_name, "assistant",
+                             answer_text, chunks=chunks)
+        except Exception:
+            pass
