@@ -5,6 +5,29 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## Chroma index committed to git as a deployment stopgap (Aug 2026)
+
+**What:** `ingestion/chroma_db/` (previously `.gitignore`'d as derived data)
+was committed to git specifically so Streamlit Community Cloud's deployed
+app has something to query — a hosted app has no access to Dave's local
+machine's filesystem otherwise.
+
+**Why this is a stopgap, not the real fix:** git isn't built for binary
+data like this, and it goes stale immediately — running `scan_folder.py`
+locally again updates Dave's local index but does nothing for the
+deployed one until someone remembers to re-commit and push it. This was
+a deliberate trade for getting a real, working demo in front of Jared
+quickly, not a decision to keep long-term.
+
+**Path to fixing properly:** Migrate vector storage from local Chroma to
+Supabase's `pgvector` extension — already the planned direction per the
+"Front end + hosting" section of `docs/architecture.md`, chosen partly
+*because* it would solve exactly this problem. Do this once there's
+time to build and test it properly, not under the time pressure of a
+same-day demo.
+
+---
+
 ## Copy-to-clipboard is clunky on mobile (iPhone)
 
 **What:** The 📋 Copy expander (added for step 6 of the frontend build)
