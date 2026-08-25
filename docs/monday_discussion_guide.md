@@ -1,11 +1,10 @@
 # Monday Discussion Guide — Jared Check-in
 
-Purpose: step back from building and re-ground on end-user needs before
-adding more scope. Since this guide was first drafted, the system has moved
-from a 3-document prototype to a real, persistently-ingested 14-document
-library — including all 8 TMs Jared provided in his first real batch. This
-is the first check-in where there's a genuinely substantial, real result to
-show him, not just a plan.
+**Session happened Aug 2026 — real answers below in Section 4.** Original
+purpose: step back from building and re-ground on end-user needs before
+adding more scope. This is now a record of what was actually learned, not
+just a pre-meeting plan — kept as history so these answers don't get lost
+or need re-asking later.
 
 ## 1. Show him something real first
 
@@ -76,17 +75,67 @@ getting his real answer rather than continuing to guess:
   files needed to be categorized — worth letting him know so future
   uploads use the current convention from the start.
 
-## 4. Decisions to bring back from this conversation
+## 4. Real answers from the session (Aug 2026)
 
-Not decisions to make live with him necessarily, but things this
-conversation should give us enough information to decide afterward:
+**What real day-to-day questions look like:** tested several real
+scenarios; the standout was Jared asking for the full clutch pressure test
+reference (test port locations, standard settings, hybrid config, and
+alarm thresholds) — the system correctly synthesized this from three
+separate pages/tables in the MCH6 manual into one clean, usable reference.
+Jared was genuinely pleased with this result — good concrete proof of
+value, not just a working demo.
 
-- Does the equipment priority order need to change?
-- Does "page-level citation" need revisiting given how he actually reads
-  answers?
-- Is a real front end more urgent than we assumed, given who'd actually
-  use this?
-- Any new TM naming/organization issues from his actual usage of the
-  Drive folder?
-- How urgent is OCR/vision-based extraction for scanned reference material,
-  given what he actually uses it for?
+**Who uses this day to day — much broader than assumed:** not just Dave
+and Jared. Real answer: **Jared** (Chief Engineer), **his mechanics and
+engineers**, the **port engineer** while the vessel is in port for
+maintenance, the **ship's captain**, and possibly others. Jared sees this
+as a tool for questions about operation/maintenance across essentially
+*all* engineering-department-responsible systems on the vessel — not a
+narrow drivetrain tool. **Action needed:** the app's user selector is
+currently hardcoded to just "Dave" and "Jared" — this needs to change
+before the wider crew can actually use it. See `BACKLOG.md`.
+
+**What "good enough" means — confirmed, no change needed:** "Honest
+answers admitting 'I don't know' is the best and only option, and guessing
+is not acceptable, even with a caveat." This matches the system's existing
+design exactly (`SYSTEM_PROMPT` already instructs Claude to say so plainly
+rather than guess or hedge) — good confirmation the core design choice is
+right, not something to revisit.
+
+**System priority order beyond drivetrain:** electrical, generators, HVAC,
+then other systems in no particular order yet.
+
+**How he imagines using this in a real moment:** roughly half the time,
+mobile phone — in an engineering space or on deck, away from his office.
+The other half, at a desk with a computer/browser. **This matters**: the
+"clunky on mobile" copy-button issue noted in `BACKLOG.md` isn't an edge
+case at this usage split — worth real priority, not a someday item.
+
+**Scanned/image-only documents:** confirmed these will matter eventually.
+OCR + metadata would help. If there's no good OCR path, Jared suggested a
+fallback: let the user view the actual source document/page directly
+rather than making it searchable — specifically called out drawings (DWG)
+with piping or electrical wiring diagrams as the case where seeing the
+actual image matters most, since the visual structure carries information
+text extraction can't. Urgency not yet determined. (This connects to the
+earlier idea, mentioned when simplifying the citation UI, of linking
+citations directly to a source PDF page — worth reviewing together, see
+`BACKLOG.md`.)
+
+**Citation precision — resolved, closing the open backlog item:**
+page-level citations are completely fine; section-level is not necessary
+and "may never be." No further work needed here — see `BACKLOG.md`.
+
+**New document types:** may be needed once more documents are collected,
+but not yet known which. Dave and Jared will discuss before adding any —
+no action needed now.
+
+**Front end:** "looks ok to proceed as is" — deployment (getting this
+in front of Jared and the crew while he's onboard the next few weeks) is
+now the top priority, ahead of new features.
+
+**Ongoing TM ingestion:** Jared will keep uploading new TMs/documents to
+the shared Drive folder, doing his best to follow the naming convention.
+Dave will run ingestion as regularly as he can. This is the established
+workflow (`docs/tm_upload_checklist.md`, `scan_folder.py`) continuing to
+operate as designed — no process change needed.

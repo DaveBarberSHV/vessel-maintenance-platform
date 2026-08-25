@@ -18,6 +18,12 @@ things, ask the user to clarify which one — e.g. "There are multiple types
 of bearings covered in these manuals (PTI, Z-drive, clutch) — which one are
 you asking about?" — rather than just reporting insufficient information.
 
+**Constraint from Dave (Aug 2026):** at most **one** clarifying question per
+issue — never loop. If the user's next message doesn't resolve the
+ambiguity (or they don't/can't answer it directly), stop asking and answer
+using the best-matching TM reference instead, clearly noting the assumption
+made rather than asking again.
+
 **Why deferred:** Requested live during Jared's second session (Aug 2026);
 Dave wants to bring a fuller batch of notes from that session before
 building this, rather than doing it as a one-off right now.
@@ -28,12 +34,16 @@ all*. This is about what Claude does *after* retrieval, when what came back
 is genuinely ambiguous between a few real, distinct things — a
 generation-time behavior change, not a retrieval change.
 
-**Suggested approach, not yet built:** Likely a `SYSTEM_PROMPT` change
-instructing Claude to ask a clarifying question — grounded in the *actual*
-distinct terms/options visible in the retrieved excerpts (not a generic
-"could you clarify?") — when the excerpts suggest more than one plausible
-match rather than one clear answer. Worth testing against the exact
-original bearing-type example above as the first real test case once built.
+**Suggested approach, not yet built:** Likely two changes together —
+(1) a `SYSTEM_PROMPT` change instructing Claude to ask a clarifying question
+grounded in the *actual* distinct terms/options visible in the retrieved
+excerpts (not a generic "could you clarify?"), and (2) passing at least the
+immediately-prior exchange into the prompt (not currently done — each
+question is answered statelessly today, with no memory of prior turns even
+though the UI displays chat history) so Claude can tell "I already asked a
+clarifying question last turn" and honor the one-question-max constraint
+instead of asking again. Worth testing against the exact original
+bearing-type example above as the first real test case once built.
 
 ---
 
@@ -70,6 +80,36 @@ if the exact right chunk doesn't surface, surfacing a chunk that reveals
 "there are several distinct bearing types" is itself useful if Claude asks
 the user to disambiguate.
 
+**Generalized (Aug 2026):** the fix was broadened from a temperature-only
+function to `expand_units()`, a small table of `(pattern, conversion)`
+entries, and pressure (psi → bar and MPa together, since manufacturers
+aren't consistent about which metric unit they use — GEWES states the same
+spec in both) was added as the second unit type. Verified: "300 psi" →
+correctly expands to "20.7bar, 2.1MPa" for search purposes.
+
+**Requested next (Aug 2026, Dave):** **torque** (crew's wrenches likely
+ft-lb, manuals — e.g. GEWES's flange-bolting table — in Nm) and **length**
+(likely inches vs. mm) — both expected to come up regularly, same pattern
+as temperature and pressure. Straightforward to add to the existing
+`UNIT_CONVERSIONS` table — each is one more entry, not a rewrite. Hold for
+the batch with Dave's meeting notes.
+
+**Refinement noted, not yet investigated (Aug 2026):** live-tested a
+follow-up question — "What happens if grease gun pressure hits 300 psi?"
+— specifically *because* 300 psi (≈2.07 MPa) sits almost exactly on the
+real, correct answer: the Service Bulletin's documented 2 MPa seal-damage
+threshold (confirmed accurate — see the Service Bulletin p.3 text, not a
+fabrication). Despite `expand_units()` correctly including "2.1MPa" in the
+search, retrieval still didn't surface that specific chunk — it pulled a
+related-but-different number instead (the shaft's internal relief valve
+spec, 0.5–1.0 MPa, from a different document) and correctly said "not
+enough information" rather than guessing. Safe outcome, but shows unit
+conversion alone doesn't guarantee retrieval consistency across different
+phrasings of a question about the same real fact. Dave: hold for later,
+don't forget. Worth a fresh, focused look — possibly related to `top_k`
+tuning, possibly to how multiple close-but-distinct numeric specs compete
+for the same ranking slots.
+
 ---
 
 ## Chroma index committed to git as a deployment stopgap (Aug 2026)
@@ -95,7 +135,28 @@ same-day demo.
 
 ---
 
-## Copy-to-clipboard is clunky on mobile (iPhone)
+## 🔺 PRIORITY — User selector hardcoded to two names, blocks the real user base
+
+**What:** `app.py`'s "Who's asking?" sidebar selector only offers `Dave`
+and `Jared` — anyone else literally cannot use the app, since there's no
+way to select or enter a different name.
+
+**Why this is urgent (Aug 2026):** Jared's answer to "who will actually
+use this" was much broader than assumed when this was built: Jared
+himself, his mechanics and engineers, the port engineer during in-port
+maintenance, the ship's captain, and possibly others — see
+`docs/monday_discussion_guide.md`. None of them can currently get past the
+name selector.
+
+**Path to fixing it:** Simplest immediate fix — replace the fixed dropdown
+with free-text name entry. More structured version (a maintained list)
+can come later if needed. Should land before or alongside deployment,
+since deployment's whole purpose is putting this in front of the wider
+crew, not just Dave and Jared.
+
+---
+
+
 
 **What:** The 📋 Copy expander (added for step 6 of the frontend build)
 uses Streamlit's built-in `st.code()` copy icon. Confirmed working on
@@ -103,22 +164,20 @@ desktop; confirmed working but "clunky" on iPhone (Aug 2026) — exact UX
 issue not pinned down (icon visibility/tap target size most likely, given
 the icon is designed for hover-based desktop interaction).
 
-**Why not fixed now:** Works well enough for today's two-person testing
-phase, and the underlying browser clipboard API itself works fine even
-when the custom icon doesn't behave nicely — long-press-to-select still
-works as a fallback on any phone regardless.
+**Elevated to priority (Aug 2026):** originally deferred pending Jared's
+real answer on desk vs. mobile usage. That answer came back: roughly
+**half his real usage will be on a mobile phone**, in an engineering space
+or on deck — not an edge case. Worth real attention, not a someday item.
 
-**Why it might matter more later:** `docs/monday_discussion_guide.md` has
-an open question for Jared about how he'd actually use this day-to-day —
-desk/laptop vs. phone in the engine room. If mobile turns out to be the
-primary use case rather than an edge case, this is worth revisiting with
-a custom mobile-friendly copy button rather than relying on Streamlit's
-default component.
+**Why not fixed immediately anyway:** the underlying browser clipboard API
+works fine even when the custom icon doesn't behave nicely —
+long-press-to-select still works as a fallback on any phone regardless, so
+this isn't fully blocking. But given the confirmed usage split, it should
+be picked up soon rather than left indefinitely.
 
 **Path to fixing it:** A small custom HTML/JS copy button (via
 `st.components.v1.html`) sized and styled for touch, instead of the
-built-in `st.code()` icon — deferred since it's extra complexity not
-justified until real usage data says it's worth it.
+built-in `st.code()` icon.
 
 ---
 
@@ -221,22 +280,24 @@ already-ingested files without also running a cleanup step.
 
 ---
 
-## Citation precision: page-level → section-level
+## ✅ RESOLVED (won't fix) — Citation precision: page-level → section-level
 
 **What:** Citations currently resolve to `document + revision + page number`
 (e.g. "MCH6 O&M Manual, p. 40"). The original target was section-level
 (e.g. "§8.4, pp. 142–144").
 
-**Why deferred:** A generic regex heading-detector was tried against the real
-manuals and proved unreliable — it matched table-of-contents entries and
-stray numbered sentences as if they were section headings, which would have
-produced *wrong* citations that look precise. Page-level citation is 100%
-reliable; false section precision is worse than no section precision.
+**Why originally deferred:** A generic regex heading-detector was tried
+against the real manuals and proved unreliable — it matched
+table-of-contents entries and stray numbered sentences as if they were
+section headings, which would have produced *wrong* citations that look
+precise. Page-level citation is 100% reliable; false section precision is
+worse than no section precision. Deferral was explicitly conditioned on
+"revisit once there's a real user (Jared) generating query volume."
 
-**Path to fixing it:** Parse each document's actual table of contents once
-per document to build a verified page→section map, rather than pattern-match
-headings blindly on every page. Revisit once there's a real user (Jared)
-generating query volume to justify the extra engineering.
+**Resolved (Aug 2026):** that real-user check happened. Jared's answer,
+after real usage: page-level citations are completely fine; section-level
+"is not necessary and may never be." No further engineering planned here —
+closing this out rather than leaving it open indefinitely.
 
 ---
 
@@ -244,7 +305,8 @@ generating query volume to justify the extra engineering.
 
 **What:** `70958__THRUSTER_ARAZIMUTH_Rev_I.pdf` is a single-page vector CAD
 drawing (general arrangement + BOM table). No extractable text — text
-extraction returns nothing.
+extraction returns nothing. As of Aug 2026, 4 more scanned reference
+documents (image-only balancing reports) share this same limitation.
 
 **Why deferred:** OCR/vision-based extraction of dimensioned engineering
 drawings is a materially bigger lift than manual text parsing, and v1 scope
@@ -255,9 +317,26 @@ revision) with no searchable text chunk. If a query might need it, the
 answer should surface it as a visual reference (e.g. "see Drawing 70958 Rev
 I") rather than silently omitting it.
 
-**Path to fixing it:** Vision-based extraction of BOM tables/dimensions from
-drawing sheets, or at minimum image-embedding-based retrieval so a query can
-at least *surface* the right drawing even without pulling text from it.
+**Jared's real-usage guidance (Aug 2026):** confirmed this will matter
+eventually — OCR + metadata would help. If there's no good OCR path,
+Jared's suggested fallback: let the user view the actual source
+document/page directly rather than requiring it to be searchable —
+specifically for drawings with piping or electrical wiring diagrams, where
+the visual structure itself carries information that text extraction can't
+capture even if OCR technically succeeds on the words present. Urgency not
+yet determined — revisit once there's a concrete case blocking someone.
+
+**Path to fixing it — two options, not yet chosen between:**
+1. Vision-based extraction of BOM tables/dimensions from drawing sheets, or
+   at minimum image-embedding-based retrieval so a query can at least
+   *surface* the right drawing even without pulling text from it.
+2. Jared's simpler fallback: skip OCR, just make it easy to view the actual
+   source page/document directly. This connects to an idea raised earlier
+   (Aug 2026, when the citation UI was simplified per Dave's feedback) —
+   linking citations directly to a source PDF page (e.g. a
+   `#page=N`-anchored link to a hosted copy of the file) rather than
+   showing extracted text at all. Worth discussing together which path (or
+   both, for different document types) makes sense before building either.
 
 ---
 
