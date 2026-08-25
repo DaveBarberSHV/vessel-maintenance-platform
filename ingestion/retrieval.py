@@ -51,7 +51,21 @@ class TfidfEmbedder(EmbeddingFunction):
 class VoyageEmbedder(EmbeddingFunction):
     """Real embedding function via Voyage AI (Anthropic's embedding
     partner). input_type differs between building (documents) and
-    querying (query) per Voyage's recommended usage."""
+    querying (query) per Voyage's recommended usage.
+
+    Internally batches requests to respect Voyage's per-request limits
+    (max 1000 items, max ~320,000 tokens per batch) — added Aug 2026 after
+    a real failure: a single collection.add() call for one large document
+    submitted its entire chunk list as one unbatched request. Fine for
+    smaller documents, but broke on two real ones once the library grew
+    past 14 documents: a 347K-token manual, and a 4,095-chunk dense parts
+    list. See BACKLOG.md. Token counts are estimated (~4 chars/token, a
+    common rough heuristic for English text — Voyage doesn't expose an
+    offline tokenizer here), with a safety margin well under the real
+    320,000 limit specifically because it's an estimate, not exact."""
+
+    MAX_ITEMS_PER_BATCH = 1000  # Voyage's hard limit
+    MAX_ESTIMATED_TOKENS_PER_BATCH = 280_000  # safety margin under the real 320,000 limit
 
     def __init__(self, api_key: str, input_type: str = "document"):
         import voyageai
@@ -59,8 +73,27 @@ class VoyageEmbedder(EmbeddingFunction):
         self.input_type = input_type
 
     def __call__(self, input: Documents) -> Embeddings:
-        result = self.client.embed(input, model=VOYAGE_MODEL, input_type=self.input_type)
-        return result.embeddings
+        batches = list(self._batches(input))
+        all_embeddings = []
+        for i, batch in enumerate(batches):
+            result = self.client.embed(batch, model=VOYAGE_MODEL, input_type=self.input_type)
+            all_embeddings.extend(result.embeddings)
+            if i < len(batches) - 1:
+                time.sleep(1)  # brief, polite pause only when there's more than one batch
+        return all_embeddings
+
+    def _batches(self, texts):
+        batch, batch_tokens = [], 0
+        for text in texts:
+            est_tokens = max(1, len(text) // 4)
+            if batch and (len(batch) >= self.MAX_ITEMS_PER_BATCH
+                          or batch_tokens + est_tokens > self.MAX_ESTIMATED_TOKENS_PER_BATCH):
+                yield batch
+                batch, batch_tokens = [], 0
+            batch.append(text)
+            batch_tokens += est_tokens
+        if batch:
+            yield batch
 
 
 def db_path(engine: str) -> Path:
@@ -112,27 +145,25 @@ def build_collection(engine: str = "voyage"):
         embedder = VoyageEmbedder(api_key, input_type="document")
         collection = client.create_collection(COLLECTION_NAME, embedding_function=embedder)
 
-        # Batched with pacing to stay under rate limits — see BACKLOG.md for
-        # the plan to make this smarter (adaptive backoff, larger batches)
-        # once the full ~20-TM library makes this worth optimizing properly.
-        batch_size = 20
-        for i in range(0, len(text_chunks), batch_size):
-            batch = text_chunks[i:i + batch_size]
-            collection.add(
-                ids=[c["chunk_id"] for c in batch],
-                documents=[c["text"] for c in batch],
-                metadatas=[{
-                    "document_title": c["document_title"],
-                    "revision": c["revision"],
-                    "page_number": c["page_number"],
-                    "equipment_model": c["equipment_model"],
-                    "document_type": c["document_type"],
-                    "source_file": c["source_file"],
-                } for c in batch],
-            )
-            print(f"Embedded {min(i + batch_size, len(text_chunks))}/{len(text_chunks)}...")
-            if i + batch_size < len(text_chunks):
-                time.sleep(15)
+        # VoyageEmbedder now batches internally to respect Voyage's own
+        # per-request limits (see its docstring) — no manual batching
+        # needed here anymore. This also resolves the older "batch pacing
+        # won't scale" backlog concern: batches are now sized close to
+        # Voyage's real limits instead of a conservative fixed 20, so far
+        # fewer requests are needed overall.
+        collection.add(
+            ids=[c["chunk_id"] for c in text_chunks],
+            documents=[c["text"] for c in text_chunks],
+            metadatas=[{
+                "document_title": c["document_title"],
+                "revision": c["revision"],
+                "page_number": c["page_number"],
+                "equipment_model": c["equipment_model"],
+                "document_type": c["document_type"],
+                "source_file": c["source_file"],
+            } for c in text_chunks],
+        )
+        print(f"Embedded {len(text_chunks)} chunks.")
 
     elif engine == "tfidf":
         from sklearn.feature_extraction.text import TfidfVectorizer
