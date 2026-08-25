@@ -5,6 +5,73 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## 🔺 REQUESTED — Ask a clarifying question instead of "not enough information" when a term is ambiguous
+
+**What:** Real example (Aug 2026, Jared's first live test): asked "We have
+a bearing running at 220 degrees F. What is going to happen?" The manual
+covers several distinct bearing types (PTI bearing, Z-drive bearing,
+clutch bearing) with different fault thresholds each — the system correctly
+avoided guessing, but its "the excerpts don't contain enough information"
+response wasn't as helpful as it could have been. Dave's request: when the
+retrieved excerpts suggest the question could mean one of several specific
+things, ask the user to clarify which one — e.g. "There are multiple types
+of bearings covered in these manuals (PTI, Z-drive, clutch) — which one are
+you asking about?" — rather than just reporting insufficient information.
+
+**Why deferred:** Requested live during Jared's second session (Aug 2026);
+Dave wants to bring a fuller batch of notes from that session before
+building this, rather than doing it as a one-off right now.
+
+**Relationship to the Fahrenheit/Celsius fix (resolved, see below):** related
+but distinct. That fix improves whether the *right chunk gets retrieved at
+all*. This is about what Claude does *after* retrieval, when what came back
+is genuinely ambiguous between a few real, distinct things — a
+generation-time behavior change, not a retrieval change.
+
+**Suggested approach, not yet built:** Likely a `SYSTEM_PROMPT` change
+instructing Claude to ask a clarifying question — grounded in the *actual*
+distinct terms/options visible in the retrieved excerpts (not a generic
+"could you clarify?") — when the excerpts suggest more than one plausible
+match rather than one clear answer. Worth testing against the exact
+original bearing-type example above as the first real test case once built.
+
+---
+
+## ✅ RESOLVED — Fahrenheit questions missed Celsius-only manual content
+
+**What:** Same real example as above. The correct chunk (MPC800A fault
+table, p. 34) exists and uses the exact term "PTI bearing" with thresholds
+in Celsius only (>70°C, >90°C) — a question using "bearing" (not "PTI
+bearing") in Fahrenheit missed it entirely. A near-identical question
+phrased in Celsius with "PTI bearing" found it correctly, confirming this
+wasn't a fluke.
+
+**Fix (Aug 2026):** `expand_temperature_units()` in `answer_query.py`
+detects Fahrenheit mentions in a question and appends the Celsius
+equivalent — used only for the search step, never shown to the user or
+substituted for what Claude actually answers. Also raised `top_k` from 3
+to 5 (retrieves more candidate chunks), giving imperfectly-phrased
+questions more room to still include the right one.
+
+**Verified:** Conversion logic tested against real and edge-case inputs —
+correctly converts "220 degrees F" → "104.4°C" (safely above the 90°C
+shutdown threshold, so should now surface the right fault-table row),
+correctly ignores Celsius-only questions, correctly avoids false positives
+like part numbers (e.g. "ABC-220F"). Full retrieval-ranking verification
+needs a live Voyage call this sandbox can't make — Dave to confirm with
+the real original question against the real index.
+
+**Still open:** the "bearing" vs "PTI bearing" terminology gap itself
+(generic term vs. the manual's specific term) isn't fully solved by this —
+`top_k=5` helps by casting a wider net, but a generic-term question could
+still miss a specific-term chunk in some cases. The clarifying-question
+feature above is one path to make this less costly when it happens: even
+if the exact right chunk doesn't surface, surfacing a chunk that reveals
+"there are several distinct bearing types" is itself useful if Claude asks
+the user to disambiguate.
+
+---
+
 ## Chroma index committed to git as a deployment stopgap (Aug 2026)
 
 **What:** `ingestion/chroma_db/` (previously `.gitignore`'d as derived data)
