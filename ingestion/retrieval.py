@@ -56,25 +56,24 @@ class VoyageEmbedder(EmbeddingFunction):
     Internally batches requests to respect Voyage's per-request limits
     (max 1000 items, max ~320,000 tokens per batch) — added Aug 2026 after
     a real failure: a single collection.add() call for one large document
-    submitted its entire chunk list as one unbatched request. Fine for
-    smaller documents, but broke on two real ones once the library grew
-    past 14 documents. See BACKLOG.md.
+    submitted its entire chunk list as one unbatched request. See
+    BACKLOG.md.
 
-    Token counts are estimated (~3 chars/token — deliberately conservative;
-    a first attempt at 4 chars/token undercounted real tokens for
-    table-heavy content, which tokenizes less efficiently per character
-    than normal prose, given the more common bare-number 4-chars/token
-    heuristic. Voyage doesn't expose an offline tokenizer here, so this
-    stays an estimate with margin, not an exact count.
-
-    A single chunk larger than the whole batch limit can't be split
-    further by batching alone — MAX_SINGLE_CHUNK_CHARS guards against
-    that case explicitly (see _batches()) rather than letting one
-    oversized chunk fail the entire file's ingestion."""
+    Batches by a hard CHARACTER limit (MAX_CHARS_PER_BATCH), not an
+    estimated token count — two earlier attempts at chars-per-token
+    heuristics (4, then 3) both still let real batches exceed Voyage's
+    320,000-token limit for this library's dense table content (measured
+    real ratio: ~1.8 chars/token for a parts-list document, far denser
+    than normal prose). Rather than guess a third ratio, MAX_CHARS_PER_BATCH
+    is set directly from that worst real ratio observed so far, with
+    margin — exact, not estimated, so no further guessing is needed as
+    long as future content isn't denser than what's already been seen.
+    Any single chunk over this limit is flagged as oversized rather than
+    attempted (see oversized_indices) — sending it alone wouldn't be safe
+    either, at this same density."""
 
     MAX_ITEMS_PER_BATCH = 1000  # Voyage's hard limit
-    MAX_ESTIMATED_TOKENS_PER_BATCH = 200_000  # safety margin under the real 320,000 limit
-    MAX_SINGLE_CHUNK_CHARS = 800_000  # ~200,000 estimated tokens — see class docstring
+    MAX_CHARS_PER_BATCH = 250_000  # ~139,000 tokens even at the densest ratio seen so far (~1.8 chars/token) — see docstring
 
     def __init__(self, api_key: str, input_type: str = "document"):
         import voyageai
@@ -86,7 +85,7 @@ class VoyageEmbedder(EmbeddingFunction):
         self.oversized_indices = []
         embeddable, embeddable_indices = [], []
         for i, text in enumerate(input):
-            if len(text) > self.MAX_SINGLE_CHUNK_CHARS:
+            if len(text) > self.MAX_CHARS_PER_BATCH:
                 self.oversized_indices.append(i)
             else:
                 embeddable.append(text)
@@ -113,15 +112,14 @@ class VoyageEmbedder(EmbeddingFunction):
         return all_embeddings
 
     def _batches(self, texts):
-        batch, batch_tokens = [], 0
+        batch, batch_chars = [], 0
         for text in texts:
-            est_tokens = max(1, len(text) // 3)
             if batch and (len(batch) >= self.MAX_ITEMS_PER_BATCH
-                          or batch_tokens + est_tokens > self.MAX_ESTIMATED_TOKENS_PER_BATCH):
+                          or batch_chars + len(text) > self.MAX_CHARS_PER_BATCH):
                 yield batch
-                batch, batch_tokens = [], 0
+                batch, batch_chars = [], 0
             batch.append(text)
-            batch_tokens += est_tokens
+            batch_chars += len(text)
         if batch:
             yield batch
 
