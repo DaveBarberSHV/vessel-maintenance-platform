@@ -5,6 +5,71 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## ✅ RESOLVED — Deployed! Voyage embedding batching broke on real large documents
+
+**What:** First deploy to Streamlit Community Cloud (Aug 2026) succeeded.
+Immediately after, ingesting a real 21-document library update (Jared's
+new batch, including a 1415-page parts manual and the real Azimuth
+Thruster O&M manual) surfaced a genuine production bug: `scan_folder.py`
+submitted an entire document's chunk list to Voyage as one unbatched API
+call. Fine at the smaller scale tested so far, but broke on two real
+documents at once — a 347K-token manual, and a 4,095-chunk dense parts
+list — both exceeding Voyage's real per-request limits (1000 items,
+~320,000 tokens).
+
+**Fix took three real iterations, each based on actual measured data, not
+assumption:**
+1. First attempt: batch by item count (≤1000) + an estimated token count
+   (~4 chars/token, a common English-prose heuristic) — fixed the
+   item-count failure, but the token estimate was still too generous for
+   this library's dense table content, which tokenizes far less
+   efficiently per character than prose.
+2. Second attempt: tightened to ~3 chars/token — still failed on the
+   parts-list document (333,900 real tokens vs. an intended 200,000
+   estimated ceiling).
+3. **Final fix:** dropped token *estimation* entirely in favor of a hard,
+   exact **character** limit (250,000 chars/batch), calibrated directly
+   from the worst real density actually measured (~1.8 chars/token) with
+   margin — no more guessing a ratio, since character count needs no
+   estimation at all.
+
+Also added: any single chunk larger than the batch limit is now flagged
+and safely excluded (with a clear console warning naming the page) rather
+than crashing the whole file's ingestion — see `VoyageEmbedder` in
+`retrieval.py`.
+
+**Verified:** full 21-document re-ingestion succeeded cleanly after the
+final fix, including the two previously-failing documents. Confirmed via
+a real question ("What are the tag out procedures for the z-drive shaft
+lock?") that the Azimuth Thruster manual's content — the whole reason it
+was uploaded — is genuinely searchable, not silently dropped.
+
+---
+
+## ✅ RESOLVED — Page citations read like the document's own page numbers, but aren't
+
+**What:** Real confusion during testing (Aug 2026): a citation read "p.
+672" for a 1415-page manual. The document's own printed page number, in
+the margin, was "636" — a 36-page gap caused by front matter/cover pages
+before the content starts. The citation's page number is the PDF file's
+physical page position, not the document's internal printed numbering,
+and nothing made that distinction clear.
+
+**Fix:** Citations now read "p. 672 of 1415" (total page count added to
+chunk metadata) whenever that's available, making clear it's a position
+within the file — not the printed page number — without the much bigger
+effort of extracting and matching each document's actual printed page
+numbers (deferred; margins aren't consistently formatted across
+manufacturers, so that would be real, separate engineering).
+
+**Note:** the library's 21 already-ingested documents don't have this
+field yet and will keep showing the plain "p. X" format until they're
+next re-ingested (a rename, content update, or a deliberate full
+rebuild via `python retrieval.py build`) — deliberately not forced
+immediately to avoid an unplanned full re-embedding of the whole library.
+
+---
+
 ## 🔺 REQUESTED — Ask a clarifying question instead of "not enough information" when a term is ambiguous
 
 **What:** Real example (Aug 2026, Jared's first live test): asked "We have
@@ -112,7 +177,7 @@ for the same ranking slots.
 
 ---
 
-## Chroma index committed to git as a deployment stopgap (Aug 2026)
+## 🔺 PRIORITY — Chroma index committed to git as a deployment stopgap (Aug 2026)
 
 **What:** `ingestion/chroma_db/` (previously `.gitignore`'d as derived data)
 was committed to git specifically so Streamlit Community Cloud's deployed
@@ -126,33 +191,48 @@ deployed one until someone remembers to re-commit and push it. This was
 a deliberate trade for getting a real, working demo in front of Jared
 quickly, not a decision to keep long-term.
 
+**Elevated to priority (Aug 2026) — real strain, not just a theoretical
+concern:** after ingesting 7 new documents in one batch (bringing the
+library to 21 documents, ~5,300 chunks), the committed database file grew
+to 58.92 MB — over GitHub's own recommended 50 MB file-size guideline
+(still pushed successfully, just a warning, not a hard failure — yet).
+Separately, the automatic redeploy after that push did NOT pick up the
+new data on its own — the app kept answering from the old dataset until
+a **manual "Reboot app"** was triggered on Streamlit Cloud. Both are real,
+now-confirmed symptoms of this stopgap starting to break down, not
+hypothetical future risk. With Jared committed to uploading more TMs
+regularly, this will keep getting worse, not better, the longer it's left
+as-is.
+
 **Path to fixing properly:** Migrate vector storage from local Chroma to
 Supabase's `pgvector` extension — already the planned direction per the
 "Front end + hosting" section of `docs/architecture.md`, chosen partly
-*because* it would solve exactly this problem. Do this once there's
-time to build and test it properly, not under the time pressure of a
-same-day demo.
+*because* it would solve exactly this problem. Recommended as the top
+priority for the next work session, ahead of new features — see the
+"what's next" discussion in project chat (Aug 2026).
 
 ---
 
-## 🔺 PRIORITY — User selector hardcoded to two names, blocks the real user base
+## ✅ RESOLVED — User selector hardcoded to two names, blocks the real user base
 
-**What:** `app.py`'s "Who's asking?" sidebar selector only offers `Dave`
-and `Jared` — anyone else literally cannot use the app, since there's no
-way to select or enter a different name.
+**What:** `app.py`'s "Who's asking?" sidebar selector only offered `Dave`
+and `Jared` — anyone else literally could not use the app, since there was
+no way to select or enter a different name.
 
-**Why this is urgent (Aug 2026):** Jared's answer to "who will actually
+**Why this was urgent (Aug 2026):** Jared's answer to "who will actually
 use this" was much broader than assumed when this was built: Jared
 himself, his mechanics and engineers, the port engineer during in-port
 maintenance, the ship's captain, and possibly others — see
-`docs/monday_discussion_guide.md`. None of them can currently get past the
-name selector.
+`docs/monday_discussion_guide.md`. None of them could get past the name
+selector.
 
-**Path to fixing it:** Simplest immediate fix — replace the fixed dropdown
-with free-text name entry. More structured version (a maintained list)
-can come later if needed. Should land before or alongside deployment,
-since deployment's whole purpose is putting this in front of the wider
-crew, not just Dave and Jared.
+**Fixed (Aug 2026):** Replaced the fixed dropdown with free-text name
+entry, with light normalization (trim + title-case) so the same person
+typing their name differently on different visits still groups correctly
+under "Past conversations." Live-tested: a brand-new name ("Port
+Engineer") correctly got a fresh conversation with no history, and
+re-typing an existing name ("Dave") correctly pulled back real prior
+history — confirming both the new-user and returning-user paths work.
 
 ---
 
@@ -482,29 +562,31 @@ fix needed (splitting dense chunks, not recovering marker cells).
 
 ---
 
-## Voyage embedding batch pacing won't scale to the full TM library
+## ✅ RESOLVED — Voyage embedding batch pacing won't scale to the full TM library
 
-**What:** `retrieval_voyage.py` currently pauses 15 seconds between every
+**What:** `retrieval_voyage.py` originally paused 15 seconds between every
 batch of 20 chunks, added as a quick fix when the first embedding run hit
-Voyage's reduced rate limit (before a payment method was added). First real
-run succeeded: 112 chunks in ~6 batches, ~1.5 minutes overhead.
+Voyage's reduced rate limit (before a payment method was added). First
+real run succeeded: 112 chunks in ~6 batches, ~1.5 minutes overhead.
 
-**Why deferred:** Worked fine for a 112-chunk corpus. Won't scale
-gracefully once Jared's full TM library (dozens of manuals, potentially
-thousands of pages) needs (re-)embedding — flat unconditional pauses add up
-fast and aren't smart about it.
+**Why originally deferred:** Worked fine for a 112-chunk corpus. Wouldn't
+scale gracefully once Jared's full TM library needed (re-)embedding — flat
+unconditional pauses add up fast and aren't smart about it.
 
-**Path to fixing it:** Two real options, worth choosing deliberately rather
-than just tuning the sleep number: (1) increase batch size toward Voyage's
-actual per-request limits so fewer requests are needed overall, and/or (2)
-only back off when an actual rate-limit error comes back, rather than
-pausing unconditionally on every batch regardless of whether it's needed —
-now that a payment method is on file, the account may not even hit the
-reduced limit anymore, making the current pause pure overhead.
+**Resolved (Aug 2026):** exactly option (1) from the original path-to-fixing
+notes below happened, forced by real necessity rather than chosen
+proactively — batching was rebuilt around Voyage's real per-request limits
+(hard character-based batches, not a conservative fixed 20) after two real
+documents broke the old unbatched approach entirely. See the "Voyage
+embedding batching broke on real large documents" entry above for the full
+story. Batches are now sized close to Voyage's real limits, with a brief
+1-second pause only between batches when more than one is needed — far
+less overhead than the original 15-second fixed pause, and no unconditional
+pausing for documents small enough to fit in one batch.
 
 ---
 
-## Incremental scanner's Chroma add/delete path needs a live test
+## ✅ RESOLVED — Incremental scanner's Chroma add/delete path needs a live test
 
 **What:** `ingestion/scan_folder.py` was built to solve a real workflow
 problem — as Jared adds TMs to Drive day by day, re-embedding the entire
@@ -512,18 +594,18 @@ library on every addition would waste time and Voyage API cost. It hashes
 each file and skips anything unchanged, only processing new or changed
 files.
 
-**What's verified vs. not:** the hash-comparison logic (unchanged files
-correctly skipped, changed files — e.g. a revision swap — correctly
-detected) was tested directly and works. The actual Chroma
-`collection.add()` / `collection.delete()` calls for new/updated chunks
-could NOT be tested from Claude's sandbox (no network access to Voyage),
-so that path is implemented but not yet proven against the real index.
+**What was verified vs. not, originally:** the hash-comparison logic was
+tested directly and worked. The actual Chroma `collection.add()` /
+`collection.delete()` calls for new/updated chunks could NOT be tested
+from Claude's sandbox (no network access to Voyage), so that path was
+implemented but not yet proven against a real index.
 
-**Path to fixing it:** first time Dave runs `scan_folder.py` for real
-(when Jared's TMs land), watch the output closely — confirm the reported
-counts (new/changed/unchanged) match expectations, and spot-check that a
-query against a newly-added TM actually returns results. If anything looks
-off, this is the first place to check.
+**Resolved:** thoroughly live-tested many times over since — real
+ingestion runs across a growing library (14 → 21 documents), real renames
+(triggering the delete/re-add path), and real incremental additions in
+batches, including two that surfaced and led to fixing real embedding
+batch-limit bugs. The add/delete path has been exercised extensively
+against production data at this point, not just once.
 
 ---
 

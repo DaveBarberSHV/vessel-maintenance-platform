@@ -16,40 +16,38 @@ flowchart LR
     C --> D["✅ Vector store<br/>Chroma DB"]
 ```
 
-- **Google Drive** — real shared folder now in active use (`Drivetrain TMs`),
-  not just a plan. Naming convention (`[System]_[Manufacturer]_[Model]_[DocType]_Rev[X].pdf`,
-  see `docs/tm_upload_checklist.md`) now includes `DWG` (renamed from the
-  original `GADrawing`) and a new `RefData` catch-all doc type for reports,
-  inspections, and other reference material that doesn't fit the other
-  categories. No live connector exists yet — see `BACKLOG.md`. Files are
-  uploaded here by hand, then pulled in via `scan_folder.py`.
+- **Google Drive** — real shared folder in active use (`Drivetrain TMs`).
+  Naming convention (`[System]_[Manufacturer]_[Model]_[DocType]_Rev[X].pdf`,
+  see `docs/tm_upload_checklist.md`) now includes `DWG` and `RefData`
+  catch-all doc types. No live connector exists yet — see `BACKLOG.md`.
+  Files are uploaded here by hand, then pulled in via `scan_folder.py`.
 - **Parse & chunk** — `ingestion/parse_and_chunk.py` + `ingestion/table_extraction.py`.
   Genuine PDFs get structured table extraction (recovers marker/checkbox
   cells that plain text loses — verified fix, see `BACKLOG.md`), not just
-  plain text. Chunk IDs are now derived from the filename itself (fixed
-  Aug 2026 — the old scheme, based on doc-type + equipment model, could
-  silently collide across multiple files sharing both, e.g. several
-  `RefData` reports for the same part — see `BACKLOG.md`). Known gap:
-  drawings/scans with no text layer get metadata-only treatment, no
-  searchable text chunk — currently true for 5 of the library's 14 files
-  (the original thruster GA drawing and 4 single-page balancing-report
-  scans; see `BACKLOG.md`'s OCR entry).
+  plain text. Dense tables (>8 data rows) also get split into standalone
+  sub-chunks so a query can match a single row instead of competing with
+  a whole table-heavy page — live-verified fix, see `BACKLOG.md`. Chunk IDs
+  are derived from the filename itself. Citations now include total page
+  count ("p. 672 of 1415") for newly-ingested documents, clarifying that
+  the number is the PDF's physical page position, not necessarily the
+  document's own printed page number — see `BACKLOG.md`.
 - **Embed chunks** — `ingestion/retrieval.py`. Real semantic embeddings via
-  Voyage AI are the default engine, live-tested successfully both in earlier
-  sandbox testing and — as of Aug 2026 — in a real run on Dave's own
-  machine. TF-IDF remains available via `--engine tfidf` for offline
-  testing without an API key.
-- **Vector store** — Chroma, embedded directly in the pipeline. **First real,
-  persistent (non-sandbox) ingestion happened Aug 2026**: all three original
-  project TMs plus Jared's initial batch of 8, plus one bilingual German/English
-  TM added as an ingestion test — 14 files, 155 chunks total — are now live
-  in Dave's local Chroma index via `scan_folder.py`. This is also the first
-  live proof that `scan_folder.py`'s `collection.add()`/`delete()` path
-  (previously only unit-tested, see resolved backlog entry) works correctly
-  end-to-end. One real bug was caught and fixed in this run: renaming an
-  already-ingested file (without also updating the tracking manifest)
-  created a silent duplicate — see `BACKLOG.md` for the fix and the still-open
-  gap (rename detection isn't built into `scan_folder.py` yet).
+  Voyage AI. Batching was rebuilt around Voyage's real per-request limits
+  (hard character-based batches, not an estimated-token guess) after real
+  production documents broke the earlier approach — see `BACKLOG.md` for
+  the full story of that fix. TF-IDF remains available via `--engine tfidf`
+  for offline testing without an API key.
+- **Vector store** — Chroma. **21 documents, ~5,300+ chunks** ingested as of
+  Aug 2026 (grew from an initial 14-document library after Jared's second
+  real TM batch). `scan_folder.py`'s incremental add/rename/delete path has
+  been extensively live-tested at this point — see resolved backlog
+  entries. **Known constraint, actively causing friction (see `BACKLOG.md`,
+  priority item):** the Chroma database is currently committed directly to
+  git as a deployment stopgap so the hosted app can read it — this is
+  straining as the library grows (a recent push warned about exceeding
+  GitHub's recommended file-size guideline, and an automatic redeploy
+  didn't pick up new data without a manual reboot). Migrating to Supabase's
+  `pgvector` is the planned real fix — see the Front end section below.
 
 ## Query time (engineer asks a question, gets a cited answer)
 
@@ -57,98 +55,91 @@ flowchart LR
 flowchart LR
     A["🔲 Question<br/>From engineer"] --> B["✅ Vector search<br/>Chroma DB"]
     B --> C["✅ Claude API<br/>Anthropic"]
-    C --> D["🔲 Cited answer<br/>To engineer"]
+    C --> D["✅ Cited answer<br/>Streamlit app"]
 ```
 
-- **Vector search** — same Chroma store from ingestion, now backed by real
-  Voyage embeddings over the full 14-document library. Live-tested with a
-  hard, broad diagnostic question ("My propulsion equipment has shut down")
-  that TF-IDF completely missed but Voyage found correctly (see `BACKLOG.md`),
-  and — as of Aug 2026 — with real queries against the newly-ingested GEWES
-  manual, including one that correctly pulled a full 16-row torque table and
-  matched the right value to the right flange size. That result is a
-  positive data point against the "dense tables get lost" concern flagged
-  as a priority backlog item, though not yet conclusive — see `BACKLOG.md`.
+- **Vector search** — same Chroma store from ingestion. Live-tested
+  extensively, including two real diagnostic questions that specifically
+  validate the system's core design: one where the right answer existed
+  and was found correctly (a shaft-lock procedure in a 547-chunk manual),
+  and one where the right answer genuinely didn't exist in the library and
+  the system said so honestly rather than guessing (a missing document,
+  not a retrieval bug — see `BACKLOG.md`).
 - **Claude API** — `ingestion/answer_query.py`. Builds a prompt from
-  retrieved excerpts, instructs Claude to answer only from those excerpts,
-  and to cite document + revision + page. Live-tested successfully,
-  including correctly synthesizing an answer that drew on two different
-  source documents at once (an O&M manual and a service bulletin) with
-  accurate separate citations for each.
+  retrieved excerpts, instructs Claude to answer only from those excerpts.
+  Citations are generated by code from retrieval metadata (`format_sources()`),
+  not by asking Claude to self-report them — more reliable, and used
+  identically by both the CLI and the deployed app.
 
-## Front end + hosting (planned, Aug 2026)
+## Front end + hosting — ✅ built and deployed (Aug 2026)
 
 ```mermaid
 flowchart LR
-    A["🔲 Jared/Dave<br/>Opens chat UI"] --> B["🟡 Streamlit app<br/>Chat UI + simple auth"]
+    A["🔲 Jared/Dave<br/>Opens chat UI"] --> B["✅ Streamlit app<br/>Live on Streamlit Cloud"]
     B --> C["✅ Existing retrieval +<br/>Claude API (reused, not rebuilt)"]
-    C --> D["🟡 Supabase Postgres<br/>Persistent chat history"]
+    C --> D["✅ Supabase Postgres<br/>Persistent chat history"]
     D --> B
 ```
 
-Decided Aug 2026, now that both items blocking front-end work (table-aware
-chunking, rename detection) are resolved and live-verified.
+Live and in real use as of Aug 2026 — deployed to Streamlit Community
+Cloud, real questions asked by both Dave and Jared, real bugs found and
+fixed against production data (see `BACKLOG.md`).
 
-- **Framework: Streamlit.** Chosen deliberately over a separate
-  JS frontend + API backend — it's Python (same language as the whole
-  pipeline), has chat UI primitives built in, and can call
-  `retrieval.py`/`answer_query.py` logic directly as a Python import. One
-  codebase, no API layer to build or keep in sync.
-- **Auth:** a shared password plus a name selector — proportionate for two
-  users (Dave, Jared). Full accounts/OAuth deliberately deferred until
-  there's an actual need for it.
-- **Persistence: Supabase (hosted Postgres).** Chosen over a simpler
-  local-file option specifically because chat history needs to survive
-  restarts/redeploys, and because Dave flagged a planned v2 feature —
-  storing maintenance/troubleshooting field notes and findings, tied to
-  specific equipment — that's a natural fit for a real relational database,
-  not a file. Supabase specifically (over other Postgres options) because
-  it includes `pgvector`, which opens a v2 path for making those future
-  field notes semantically searchable using the same retrieval approach
-  already built and tested here — without needing new infrastructure when
-  that day comes. Chat messages will be tagged with the same equipment/
-  vessel/doc-type vocabulary already used in citations, so v2 notes can
-  link to existing identifiers rather than needing a data-model retrofit.
-- **Hosting: Streamlit Community Cloud.** Free tier, deploys straight from
-  the GitHub repo with minimal setup — deliberately the lowest-effort
-  hosting option available, appropriate for a 2-person internal tool.
-- **Ingestion stays separate from the front end.** `scan_folder.py` remains
-  a Dave-run, local, command-line process — the front end is query-only.
-  The ingestion pipeline is still hand-run and inspected closely on
-  purpose (see resolved backlog entries — that's how real bugs kept
-  getting caught), so it isn't being folded into a shared-access UI yet.
+- **Framework: Streamlit.** Confirmed the right call in practice — one
+  Python codebase, no separate API layer, fast to iterate.
+- **Auth: free-text name field only — no password.** The original plan
+  included a shared password; that part was never actually built, only
+  the name field. Fine for now since the URL is only being shared with
+  Dave and Jared directly, but **this needs revisiting before the wider
+  crew (mechanics, port engineer, captain) gets access** — currently
+  anyone with the link can use it with no gate at all.
+- **Persistence: Supabase (hosted Postgres), live and working.** Real
+  cross-session history confirmed working on the deployed app, not just
+  locally — survives restarts, correctly separates conversations by user.
+  👍/👎 feedback per message also live, stored per-message, toggleable.
+- **Hosting: Streamlit Community Cloud.** Deployed successfully; real
+  operational lesson learned: after a large data push (a big ingestion
+  batch), the automatic redeploy didn't reliably pick up the new Chroma
+  data — a manual **"Reboot app"** was needed to force it. Worth doing
+  proactively after any significant ingestion update until the Supabase
+  migration removes this dependency on committed binary data entirely.
+- **Ingestion stays separate from the front end**, as planned —
+  `scan_folder.py` remains a Dave-run, local, command-line process.
 
-**Planned v1 feature build order:**
-1. Refactor `answer_query.py`'s logic into an importable function (currently
-   a CLI-only script)
-2. Basic Streamlit chat UI calling that function directly
-3. Citations shown with the actual retrieved excerpt inline, not just a
-   page number — the highest-leverage trust-building feature identified in
-   `docs/monday_discussion_guide.md`
-4. Persistent history via Supabase, tagged by user
-5. 👍/👎 per answer, stored alongside history — keeps some of the
-   "catch bugs by inspection" visibility once answers aren't only being
-   read raw in a terminal anymore
-6. Copy button with two modes: plain answer, and answer-with-citations —
-   deliberate choice so a copied fact doesn't lose its source when pasted
-   into a maintenance log or email
-7. Deploy to Streamlit Community Cloud, live-test with Jared
-
-
+**v1 feature build order — all 7 steps complete:**
+1. ✅ Refactored `answer_query.py` into an importable function
+2. ✅ Basic Streamlit chat UI
+3. ✅ Citations shown clearly (simplified to document+page after Dave's
+   feedback that raw excerpt text — bilingual mixing, broken table
+   formatting — looked worse than helpful; a cleaner, code-generated
+   citation line replaced it)
+4. ✅ Persistent history via Supabase, tagged by user
+5. ✅ 👍/👎 per answer, stored alongside history
+6. ✅ Copy button, two modes (plain / with sources) — known rough edge:
+   clunky on iPhone, elevated to priority given confirmed ~50% mobile
+   usage — see `BACKLOG.md`
+7. ✅ Deployed to Streamlit Community Cloud, real live use by Jared
 
 ## Not yet on this diagram (known future moves)
 
+- **🔺 Top priority for next session:** migrate vector storage from
+  git-committed Chroma to Supabase `pgvector` — see the priority backlog
+  entry for why this has become urgent rather than theoretical.
+- A real password/access gate before the wider crew gets the URL
 - A live Google Drive connector, if/when one becomes available
 - OCR/vision-based extraction for scanned reference docs and drawings —
-  5 of the current 14 files have no searchable text (see `BACKLOG.md`)
-- Anything supporting more than one vessel or more than a couple of testers
+  several library files have no searchable text (see `BACKLOG.md`); Jared's
+  suggested fallback (link directly to the source page/document rather
+  than requiring full OCR) is a real, simpler alternative worth weighing
+- The clarifying-question feature (ask once, don't loop, per Dave's
+  constraint) — fully scoped in `BACKLOG.md`, not yet built
+- Torque and length unit conversions — requested by Dave, same pattern as
+  the already-built temperature/pressure conversions, not yet added
+- Anything supporting more than one vessel
 - **V2 idea, not yet scoped:** storing maintenance/troubleshooting field
   notes and findings from real engineers, tied to specific equipment —
-  raised by Dave while deciding the front-end database (Aug 2026). Directly
-  influenced the choice of Supabase (Postgres + `pgvector`) over a simpler
-  option, so this remains straightforward to add later without an
-  infrastructure change. Not designed or built — just flagged so the
-  reasoning behind today's database choice doesn't get lost.
+  directly influenced the choice of Supabase (Postgres + `pgvector`) over
+  a simpler option, so this remains straightforward to add later.
 
 See `BACKLOG.md` for the reasoning behind each deferred item, and
 `README.md` for the broader project state.
