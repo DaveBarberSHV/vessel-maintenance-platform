@@ -39,6 +39,9 @@ class Chunk:
     page_number: int
     section: str | None
     has_text_layer: bool
+    total_pages: int  # for citations like "p. 672 of 1415" — the PDF's
+    # own physical page position, not the document's printed page number
+    # (which can differ due to cover pages/front matter — see BACKLOG.md)
 
 
 def extract_pages(path: Path):
@@ -130,6 +133,7 @@ def chunk_document(path: Path, metadata: dict) -> list[Chunk]:
     # See BACKLOG.md for the case that surfaced this.
     file_stem = re.sub(r"[^A-Za-z0-9]+", "_", path.stem)
     pages = extract_pages(path)
+    total_pages = len(pages)
     chunks = []
     for page_number, text, tables in pages:
         section = detect_section(text)
@@ -146,6 +150,7 @@ def chunk_document(path: Path, metadata: dict) -> list[Chunk]:
             page_number=page_number,
             section=section,
             has_text_layer=bool(text.strip()),
+            total_pages=total_pages,
         ))
         for table_idx, extra_text in enumerate(split_dense_tables(tables, page_number), start=1):
             chunks.append(Chunk(
@@ -161,6 +166,7 @@ def chunk_document(path: Path, metadata: dict) -> list[Chunk]:
                 page_number=page_number,
                 section=section,
                 has_text_layer=True,
+                total_pages=total_pages,
             ))
     return chunks
 

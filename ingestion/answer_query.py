@@ -185,7 +185,19 @@ def format_sources(chunks: list[dict]) -> str:
     (not from Claude's own summary of it), so it's independently accurate
     rather than dependent on the model reliably reformatting it every time.
     Used by both the CLI and the Streamlit front end so citations look and
-    behave identically in both places."""
+    behave identically in both places.
+
+    Page format: "p. X of Y" when total_pages is known (Aug 2026 — added
+    after real confusion: "p. 672" reads like the number printed in the
+    document's own margin, but it's actually the PDF file's physical page
+    position, which can drift from the document's internal printed page
+    numbers whenever there's a cover page, TOC, or front matter — happened
+    for real on a 1415-page manual, a 36-page gap). Falls back to plain
+    "p. X" when total_pages isn't in a chunk's metadata — documents
+    ingested before this change don't have it yet, and re-ingesting the
+    whole library just for this wasn't worth doing immediately; they'll
+    pick up the fuller format automatically whenever they're next
+    re-ingested (e.g. a rename or content update)."""
     lines = []
     seen = set()
     for c in chunks:
@@ -194,7 +206,9 @@ def format_sources(chunks: list[dict]) -> str:
         if key in seen:
             continue
         seen.add(key)
-        lines.append(f'- {m["document_title"]}, {m["revision"]}, p. {m["page_number"]}')
+        total = m.get("total_pages")
+        page_label = f'p. {m["page_number"]} of {total}' if total else f'p. {m["page_number"]}'
+        lines.append(f'- {m["document_title"]}, {m["revision"]}, {page_label}')
     return "Sources:\n" + "\n".join(lines) if lines else ""
 
 

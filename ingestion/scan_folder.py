@@ -301,6 +301,7 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                         "document_title": text_chunks[i].document_title,
                         "revision": text_chunks[i].revision,
                         "page_number": text_chunks[i].page_number,
+                        "total_pages": text_chunks[i].total_pages,
                         "equipment_model": text_chunks[i].equipment_model,
                         "document_type": text_chunks[i].document_type,
                         "source_file": text_chunks[i].source_file,
