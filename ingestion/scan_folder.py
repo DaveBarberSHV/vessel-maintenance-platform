@@ -282,18 +282,36 @@ def scan_folder(folder: Path, engine: str = "voyage"):
             text_chunks = [c for c in file_chunks if c.has_text_layer and c.text.strip()]
 
             if text_chunks:
+                # Compute embeddings ourselves first (rather than letting
+                # collection.add() trigger it) so we can filter out any
+                # chunk VoyageEmbedder flags as too large to embed at all
+                # (see its MAX_SINGLE_CHUNK_CHARS) BEFORE storing anything
+                # — added Aug 2026 after a real oversized chunk broke a
+                # whole file's ingestion. See BACKLOG.md.
+                texts = [c.text for c in text_chunks]
+                embeddings = embedder(texts)
+                oversized = set(getattr(embedder, "oversized_indices", []))
+
+                keep = [i for i in range(len(text_chunks)) if i not in oversized]
                 collection.add(
-                    ids=[c.chunk_id for c in text_chunks],
-                    documents=[c.text for c in text_chunks],
+                    ids=[text_chunks[i].chunk_id for i in keep],
+                    documents=[text_chunks[i].text for i in keep],
+                    embeddings=[embeddings[i] for i in keep],
                     metadatas=[{
-                        "document_title": c.document_title,
-                        "revision": c.revision,
-                        "page_number": c.page_number,
-                        "equipment_model": c.equipment_model,
-                        "document_type": c.document_type,
-                        "source_file": c.source_file,
-                    } for c in text_chunks],
+                        "document_title": text_chunks[i].document_title,
+                        "revision": text_chunks[i].revision,
+                        "page_number": text_chunks[i].page_number,
+                        "equipment_model": text_chunks[i].equipment_model,
+                        "document_type": text_chunks[i].document_type,
+                        "source_file": text_chunks[i].source_file,
+                    } for i in keep],
                 )
+                if oversized:
+                    pages = sorted({text_chunks[i].page_number for i in oversized})
+                    print(f"  WARNING: {len(oversized)} chunk(s) too large to embed "
+                          f"(page(s) {pages}) — NOT added to the index. This usually "
+                          f"means a page's text didn't split as expected; worth a "
+                          f"look if that page's content matters for search.")
 
             new_chunks = [asdict(c) for c in file_chunks]
             chunks.extend(new_chunks)

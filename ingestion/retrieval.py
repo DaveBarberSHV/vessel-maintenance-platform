@@ -58,34 +58,64 @@ class VoyageEmbedder(EmbeddingFunction):
     a real failure: a single collection.add() call for one large document
     submitted its entire chunk list as one unbatched request. Fine for
     smaller documents, but broke on two real ones once the library grew
-    past 14 documents: a 347K-token manual, and a 4,095-chunk dense parts
-    list. See BACKLOG.md. Token counts are estimated (~4 chars/token, a
-    common rough heuristic for English text — Voyage doesn't expose an
-    offline tokenizer here), with a safety margin well under the real
-    320,000 limit specifically because it's an estimate, not exact."""
+    past 14 documents. See BACKLOG.md.
+
+    Token counts are estimated (~3 chars/token — deliberately conservative;
+    a first attempt at 4 chars/token undercounted real tokens for
+    table-heavy content, which tokenizes less efficiently per character
+    than normal prose, given the more common bare-number 4-chars/token
+    heuristic. Voyage doesn't expose an offline tokenizer here, so this
+    stays an estimate with margin, not an exact count.
+
+    A single chunk larger than the whole batch limit can't be split
+    further by batching alone — MAX_SINGLE_CHUNK_CHARS guards against
+    that case explicitly (see _batches()) rather than letting one
+    oversized chunk fail the entire file's ingestion."""
 
     MAX_ITEMS_PER_BATCH = 1000  # Voyage's hard limit
-    MAX_ESTIMATED_TOKENS_PER_BATCH = 280_000  # safety margin under the real 320,000 limit
+    MAX_ESTIMATED_TOKENS_PER_BATCH = 200_000  # safety margin under the real 320,000 limit
+    MAX_SINGLE_CHUNK_CHARS = 800_000  # ~200,000 estimated tokens — see class docstring
 
     def __init__(self, api_key: str, input_type: str = "document"):
         import voyageai
         self.client = voyageai.Client(api_key=api_key)
         self.input_type = input_type
+        self.oversized_indices: list[int] = []  # populated during __call__, read by callers that need to know
 
     def __call__(self, input: Documents) -> Embeddings:
-        batches = list(self._batches(input))
-        all_embeddings = []
+        self.oversized_indices = []
+        embeddable, embeddable_indices = [], []
+        for i, text in enumerate(input):
+            if len(text) > self.MAX_SINGLE_CHUNK_CHARS:
+                self.oversized_indices.append(i)
+            else:
+                embeddable.append(text)
+                embeddable_indices.append(i)
+
+        batches = list(self._batches(embeddable))
+        computed = []
         for i, batch in enumerate(batches):
             result = self.client.embed(batch, model=VOYAGE_MODEL, input_type=self.input_type)
-            all_embeddings.extend(result.embeddings)
+            computed.extend(result.embeddings)
             if i < len(batches) - 1:
                 time.sleep(1)  # brief, polite pause only when there's more than one batch
+
+        # Reassemble in original order. Oversized chunks get a zero-vector
+        # placeholder — Chroma's collection.add() requires one embedding
+        # per input item, so this can't just be omitted; callers should
+        # filter oversized_indices out of ids/documents/metadatas before
+        # calling add() to avoid actually storing a meaningless zero
+        # vector. (scan_folder.py does this — see its use of this class.)
+        dim = len(computed[0]) if computed else 1024
+        all_embeddings = [[0.0] * dim] * len(input)
+        for idx, emb in zip(embeddable_indices, computed):
+            all_embeddings[idx] = emb
         return all_embeddings
 
     def _batches(self, texts):
         batch, batch_tokens = [], 0
         for text in texts:
-            est_tokens = max(1, len(text) // 4)
+            est_tokens = max(1, len(text) // 3)
             if batch and (len(batch) >= self.MAX_ITEMS_PER_BATCH
                           or batch_tokens + est_tokens > self.MAX_ESTIMATED_TOKENS_PER_BATCH):
                 yield batch
@@ -145,24 +175,33 @@ def build_collection(engine: str = "voyage"):
         embedder = VoyageEmbedder(api_key, input_type="document")
         collection = client.create_collection(COLLECTION_NAME, embedding_function=embedder)
 
-        # VoyageEmbedder now batches internally to respect Voyage's own
-        # per-request limits (see its docstring) — no manual batching
-        # needed here anymore. This also resolves the older "batch pacing
-        # won't scale" backlog concern: batches are now sized close to
-        # Voyage's real limits instead of a conservative fixed 20, so far
-        # fewer requests are needed overall.
+        # Compute embeddings ourselves (rather than letting collection.add()
+        # trigger it) so any chunk VoyageEmbedder flags as too large to
+        # embed at all (oversized_indices — see its docstring) can be
+        # filtered out before storing anything. Same fix as scan_folder.py;
+        # see BACKLOG.md.
+        texts = [c["text"] for c in text_chunks]
+        embeddings = embedder(texts)
+        oversized = set(embedder.oversized_indices)
+        keep = [i for i in range(len(text_chunks)) if i not in oversized]
+
         collection.add(
-            ids=[c["chunk_id"] for c in text_chunks],
-            documents=[c["text"] for c in text_chunks],
+            ids=[text_chunks[i]["chunk_id"] for i in keep],
+            documents=[text_chunks[i]["text"] for i in keep],
+            embeddings=[embeddings[i] for i in keep],
             metadatas=[{
-                "document_title": c["document_title"],
-                "revision": c["revision"],
-                "page_number": c["page_number"],
-                "equipment_model": c["equipment_model"],
-                "document_type": c["document_type"],
-                "source_file": c["source_file"],
-            } for c in text_chunks],
+                "document_title": text_chunks[i]["document_title"],
+                "revision": text_chunks[i]["revision"],
+                "page_number": text_chunks[i]["page_number"],
+                "equipment_model": text_chunks[i]["equipment_model"],
+                "document_type": text_chunks[i]["document_type"],
+                "source_file": text_chunks[i]["source_file"],
+            } for i in keep],
         )
+        if oversized:
+            print(f"WARNING: {len(oversized)} chunk(s) across the library were too "
+                  f"large to embed and were NOT added to the index — see per-file "
+                  f"output above for which pages.")
         print(f"Embedded {len(text_chunks)} chunks.")
 
     elif engine == "tfidf":
