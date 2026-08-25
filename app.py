@@ -79,12 +79,18 @@ if "user_name" not in st.session_state:
 
 with st.sidebar:
     st.subheader("Who's asking?")
-    chosen = st.selectbox(
-        "Name", ["Select...", "Dave", "Jared"],
-        index=["Select...", "Dave", "Jared"].index(st.session_state.user_name or "Select..."),
+    name_input = st.text_input(
+        "Name", value=st.session_state.user_name or "",
+        placeholder="Type your name...",
         label_visibility="collapsed",
     )
-    st.session_state.user_name = None if chosen == "Select..." else chosen
+    # Free-text (Aug 2026) — was a fixed Dave/Jared dropdown, which blocked
+    # everyone else on the crew from using the app at all. Light
+    # normalization (trim + title-case) so "jared" / "Jared" / "JARED"
+    # from different visits still group together under one consistent
+    # name for "Past conversations" and feedback — matching is an exact
+    # string comparison at the database level, not case-insensitive.
+    st.session_state.user_name = name_input.strip().title() or None
 
     if st.session_state.user_name and db_available:
         st.divider()
