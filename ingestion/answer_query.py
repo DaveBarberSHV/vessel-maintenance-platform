@@ -19,9 +19,77 @@ Usage:
 """
 
 import os
+import re
 import sys
 
 from retrieval import query_chunks
+
+
+# Real case that motivated this (Aug 2026, Jared's first live test): "We
+# have a bearing running at 220 degrees F. What is going to happen?" missed
+# the correct fault-table chunk entirely — it exists, but is written only
+# in Celsius (">70°C", ">90°C"). A near-identical question phrased in
+# Celsius found it correctly. See BACKLOG.md. The underlying problem isn't
+# specific to temperature — crew uses English/Imperial units (°F, psi),
+# manuals often use metric (°C, bar, MPa) — so this is a small, generic
+# table rather than a one-off temperature function, to make adding the
+# next unit pair (e.g. torque, length) a one-line addition, not a rewrite.
+#
+# Each entry: a name (for clarity only), a regex matching "<number> <unit>"
+# (deliberately requiring an explicit unit marker, not a bare number, to
+# avoid misfiring on unrelated numbers like part numbers), and one or more
+# (label, conversion function) pairs — some units get converted to more
+# than one target, since manufacturers aren't consistent about which
+# metric unit they use (e.g. GEWES's own manual states relief-valve
+# pressure in both bar AND MPa together: "0.5 to 1.0 MPa (5 to 10 bar)").
+UNIT_CONVERSIONS = [
+    {
+        "name": "fahrenheit",
+        "source_label": "°F",
+        "pattern": re.compile(
+            r"(-?\d+(?:\.\d+)?)\s*(?:°\s*F\b|degrees?\s*F\b|deg\.?\s*F\b)",
+            re.IGNORECASE,
+        ),
+        "targets": [
+            ("°C", lambda f: (f - 32) * 5 / 9),
+        ],
+    },
+    {
+        "name": "psi",
+        "source_label": "psi",
+        "pattern": re.compile(r"(-?\d+(?:\.\d+)?)\s*psi\b", re.IGNORECASE),
+        "targets": [
+            ("bar", lambda psi: psi * 0.0689476),
+            ("MPa", lambda psi: psi * 0.00689476),
+        ],
+    },
+]
+
+
+def expand_units(text: str) -> str:
+    """If the text mentions a value in a unit crew commonly use that
+    differs from what the manuals use, append the metric equivalent(s) —
+    used only to build a better search query, never shown to the user or
+    to Claude as a replacement for what they actually asked. A search in
+    the "wrong" unit system can have little lexical or semantic overlap
+    with metric-only manual content, even though the conversion itself is
+    trivial."""
+    additions = []
+    for spec in UNIT_CONVERSIONS:
+        for match_str in spec["pattern"].findall(text):
+            value = float(match_str)
+            converted = ", ".join(
+                f"{target(value):.1f}{unit}" for unit, target in spec["targets"]
+            )
+            additions.append(f"{match_str}{spec['source_label']} ({converted})")
+    if not additions:
+        return text
+    return text + " [" + ", ".join(additions) + "]"
+
+
+# Kept as a thin alias — expand_temperature_units was the original,
+# narrower name before this was generalized to expand_units() above.
+expand_temperature_units = expand_units
 
 
 SYSTEM_PROMPT = """You are a technical assistant for a ship's engineering department. \
@@ -56,13 +124,18 @@ Manual excerpts retrieved for this question:
 Answer the question using only the excerpts above."""
 
 
-def get_answer(question: str, engine: str = "voyage", top_k: int = 3,
+def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
                api_key: str | None = None) -> dict:
     """The importable core of this module — used by both the CLI below and
     the Streamlit front end. Returns a dict rather than printing, and
     raises a normal exception rather than sys.exit()-ing, since this now
     needs to run safely inside a long-lived app process, not just as a
     one-shot script.
+
+    top_k default raised from 3 to 5 (Aug 2026) — a real missed-retrieval
+    case (see BACKLOG.md) suggested the right chunk can rank just outside
+    the top 3 for an imperfectly-phrased question; a slightly wider net
+    costs a little more context but meaningfully reduces that risk.
 
     Returns:
         {
@@ -79,7 +152,8 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 3,
     Raises:
         ValueError if no Anthropic API key is available.
     """
-    chunks = query_chunks(question, engine=engine, top_k=top_k)
+    search_query = expand_units(question)
+    chunks = query_chunks(search_query, engine=engine, top_k=top_k)
     prompt = build_prompt(question, chunks)
 
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -124,15 +198,18 @@ def format_sources(chunks: list[dict]) -> str:
     return "Sources:\n" + "\n".join(lines) if lines else ""
 
 
-def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: int = 3):
+def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: int = 5):
     """CLI-facing wrapper — keeps the exact command-line behavior/UX
     unchanged (dry-run printing, sys.exit on a missing key) while
     delegating the real work to get_answer()."""
     if dry_run:
-        chunks = query_chunks(question, engine=engine, top_k=top_k)
+        search_query = expand_units(question)
+        chunks = query_chunks(search_query, engine=engine, top_k=top_k)
         prompt = build_prompt(question, chunks)
         print("=== SYSTEM PROMPT ===")
         print(SYSTEM_PROMPT)
+        if search_query != question:
+            print(f"\n=== SEARCH QUERY (expanded from question) ===\n{search_query}")
         print("\n=== USER PROMPT (what would be sent) ===")
         print(prompt)
         return
