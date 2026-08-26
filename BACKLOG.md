@@ -5,6 +5,30 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## 🔺 OPEN — Exposed service_role key needs rotation (Aug 2026)
+
+**What:** The Supabase `service_role` secret key was accidentally pasted
+into chat while troubleshooting a connection-string mix-up (Aug 2026).
+This key has full, unrestricted access to the project — more sensitive
+than the Voyage key exposure earlier in the project.
+
+**Status:** rotation not yet completed. Supabase's UI for this changed
+recently — the classic "regenerate" button wasn't found on the API Keys
+page; the "JWT Keys" → "Legacy JWT Secret" page appears to be the right
+place (rotating the underlying JWT secret regenerates both `anon` and
+`service_role` legacy keys), but this wasn't confirmed working yet.
+
+**Why not fixed immediately:** didn't want to block the actual latency
+investigation on a UI hunt; the exposure risk is real but the key hasn't
+shown signs of misuse so far.
+
+**Next step:** find and complete the rotation, or contact Supabase
+support if the UI path isn't clear. Once rotated, `SUPABASE_SERVICE_KEY`
+in both `.streamlit/secrets.toml` and Streamlit Cloud's deployed secrets
+needs updating to the new value.
+
+---
+
 ## ✅ RESOLVED (mostly) — Page images: view the actual diagram/table for a citation
 
 **What:** Real problem, raised by Dave (Aug 2026): a 1415-page parts manual
@@ -65,21 +89,56 @@ the rendered page matched the answer's content exactly).
   automatically. A deliberate backfill decision/script is still needed if
   Dave wants the whole existing library covered, not just new additions
   going forward.
-- **A real performance concern surfaced during testing** — the app hit a
-  Postgres statement timeout on the (unrelated, simple) chat-history
-  query right after this work, and general response slowness. Not yet
-  root-caused: possibly Supabase's free tier pausing the whole project
-  after inactivity (same pattern seen with Streamlit Cloud earlier — see
-  the resolved deployment-stopgap entry), possibly the `tm_chunks` table's
-  lack of an approximate-nearest-neighbor index becoming a real problem
-  rather than a theoretical one now that Storage calls are also happening.
-  Next step: check the Supabase dashboard for a paused/restoring status,
-  and get a real timed measurement of a retrieval query
-  (`time python retrieval.py query "..." --engine voyage`) to tell the
-  two apart.
 - **No storage-size/cost monitoring set up yet** for the images bucket —
   worth a periodic glance at Supabase's dashboard as the library grows,
   same as the existing recommendation for Voyage/Anthropic usage.
+
+---
+
+## ✅ RESOLVED — Real "unexplained slowness" traced to a stranded idle-in-transaction connection
+
+**What:** During page-images testing (Aug 2026), the app started hanging
+indefinitely — a Postgres statement timeout on chat history, then general
+unresponsiveness with no clear error, sometimes clearing up after a wait,
+sometimes not.
+
+**What it wasn't, ruled out with real evidence rather than assumption:**
+- Wrong connection string — a real issue hit along the way (accidentally
+  set `SUPABASE_DB_URL` to a JWT key at one point; separately, the Direct
+  Connection hostname resurfaced instead of the Session pooler one), but
+  fixing that alone didn't resolve the hang.
+- Supabase free-tier "cold" pause — dashboard showed normal CPU/RAM/disk,
+  9/60 connections in use, no paused/restoring status.
+- Connection pool exhaustion — same dashboard check ruled this out.
+- The `tm_chunks` table needing a real search index — a purpose-built
+  diagnostic (`diagnose_latency.py`, timing connection/embedding/search
+  steps separately, twice) showed the vector search itself was fast
+  (0.25s) once actually connected — the original reasoning that a plain
+  scan is fine at this library's scale held up.
+
+**What it actually was:** `db.py`'s cached, long-lived database connection
+(reused for the whole browser session) never set `autocommit`. Every
+statement — including a plain read like `list_conversations()` — silently
+opened a transaction that only closes when something later calls
+`.commit()`. A session that got killed abruptly right after a read (this
+project had several today, from testing) left that transaction stranded
+on the server — a real one sat "idle in transaction" for almost 6 hours.
+Confirmed directly with a second diagnostic (`diagnose_locks.py`, querying
+Postgres's own `pg_stat_activity`) — found the exact stuck connection,
+running the exact query, for the exact duration that matched the symptom.
+
+**Fixed:** `db.get_connection()` now sets `conn.autocommit = True`. Every
+statement commits immediately; no connection can be left holding an open
+transaction regardless of how the session ends. The one stuck connection
+was cleared manually (`pg_terminate_backend`) to unblock testing
+immediately; the code fix prevents new ones from accumulating.
+
+**Worth remembering:** this specific failure mode — indefinite hang, no
+error message, intermittent — is a classic sign of a database-level lock
+conflict, not an application bug in the usual sense. `pg_stat_activity` is
+the right first place to look next time something like this happens
+again, before assuming it's a connection string, cold start, or missing
+index.
 
 ---
 
