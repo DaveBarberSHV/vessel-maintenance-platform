@@ -5,6 +5,35 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## ⚠️ Known operational gotcha — deploys silently need a manual reboot
+
+**What:** Twice now (Aug 2026) — once after a large data push (the
+pgvector migration), once after the page-images feature push — Streamlit
+Cloud's automatic redeploy did not reliably bring the app fully up to
+date on its own. The app *looked* fine (loaded, answered questions
+normally) but was silently broken in a real way: the first time, serving
+stale data; the second time, silently failing to save any chat messages
+at all (`save_message()` failures are deliberately swallowed — see
+`app.py` — so this produced zero visible error, just quietly lost data).
+Confirmed both times by checking real database state directly, not by
+how the app looked.
+
+**Real cost this time:** a genuine, unrecoverable small data loss — two
+real Q&A exchanges asked during the broken window were never saved,
+since they were never written to the database at all.
+
+**Not yet root-caused** — could be something to do with cached resources
+(`@st.cache_resource` connections) surviving a redeploy that should have
+replaced them, could be a Streamlit Cloud platform quirk. Not investigated
+deeply, since the reliable workaround is simple.
+
+**Standing practice going forward:** manually reboot the deployed app
+after every push that touches `app.py`, `db.py`, or dependencies —
+don't rely on the automatic redeploy alone, and verify with a real
+follow-up question rather than just glancing at whether the app loads.
+
+---
+
 ## 🔺 OPEN — Exposed service_role key needs rotation (Aug 2026)
 
 **What:** The Supabase `service_role` secret key was accidentally pasted
