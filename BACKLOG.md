@@ -177,39 +177,53 @@ for the same ranking slots.
 
 ---
 
-## 🔺 PRIORITY — Chroma index committed to git as a deployment stopgap (Aug 2026)
+## ✅ RESOLVED — Chroma index committed to git as a deployment stopgap (Aug 2026)
 
 **What:** `ingestion/chroma_db/` (previously `.gitignore`'d as derived data)
 was committed to git specifically so Streamlit Community Cloud's deployed
 app has something to query — a hosted app has no access to Dave's local
 machine's filesystem otherwise.
 
-**Why this is a stopgap, not the real fix:** git isn't built for binary
+**Why this was a stopgap, not the real fix:** git isn't built for binary
 data like this, and it goes stale immediately — running `scan_folder.py`
 locally again updates Dave's local index but does nothing for the
 deployed one until someone remembers to re-commit and push it. This was
 a deliberate trade for getting a real, working demo in front of Jared
 quickly, not a decision to keep long-term.
 
-**Elevated to priority (Aug 2026) — real strain, not just a theoretical
-concern:** after ingesting 7 new documents in one batch (bringing the
-library to 21 documents, ~5,300 chunks), the committed database file grew
-to 58.92 MB — over GitHub's own recommended 50 MB file-size guideline
-(still pushed successfully, just a warning, not a hard failure — yet).
-Separately, the automatic redeploy after that push did NOT pick up the
-new data on its own — the app kept answering from the old dataset until
-a **manual "Reboot app"** was triggered on Streamlit Cloud. Both are real,
-now-confirmed symptoms of this stopgap starting to break down, not
-hypothetical future risk. With Jared committed to uploading more TMs
-regularly, this will keep getting worse, not better, the longer it's left
-as-is.
+**Confirmed the strain was real, not theoretical:** after ingesting 7 new
+documents in one batch (21 documents, ~5,300 chunks), the committed
+database file grew to 58.92 MB — over GitHub's recommended 50 MB
+guideline — and a redeploy failed to pick up new data automatically,
+needing a manual "Reboot app." Both real, confirmed symptoms, not
+hypothetical risk.
 
-**Path to fixing properly:** Migrate vector storage from local Chroma to
-Supabase's `pgvector` extension — already the planned direction per the
-"Front end + hosting" section of `docs/architecture.md`, chosen partly
-*because* it would solve exactly this problem. Recommended as the top
-priority for the next work session, ahead of new features — see the
-"what's next" discussion in project chat (Aug 2026).
+**Resolved (Aug 2026):** migrated vector storage from local Chroma to
+Supabase's `pgvector` extension. `retrieval.py` and `scan_folder.py`
+rewritten to read/write a `tm_chunks` Postgres table instead of a local
+Chroma collection — `answer_query.py` and `app.py` needed zero changes,
+since both already went through the `query_chunks()`/`get_answer()`
+abstraction layer built earlier. A one-time migration script
+(`migrate_chroma_to_postgres.py`) copied all 5,386 existing chunks and
+their already-computed embeddings directly from the committed Chroma
+database into Postgres — no Voyage re-embedding, no cost.
+
+**Verified at every layer:** unit tests on the new SQL/batching logic,
+a real end-to-end test against the actual production Chroma data (5,386
+in, 5,386 migrated), the rename-detection path re-tested against the new
+backend, a real CLI query, a local Streamlit test, and finally the actual
+**deployed production app** — all confirmed working, including a repeat
+of the exact original "z-drive shaft lock" test question. The next code
+push after this migration was 5.23 KiB, versus the 49+ MiB push that
+originally surfaced this problem.
+
+**Remaining cleanup, not urgent:** `ingestion/chroma_db/voyage/` is no
+longer used for anything and was removed from git tracking going
+forward (back in `.gitignore`), but the ~59 MB already sitting in the
+repo's git *history* doesn't shrink automatically — that would need a
+more involved history rewrite, deliberately not done casually. Worth
+revisiting later if repo size ever becomes a real problem again; not
+urgent now that new pushes are small.
 
 ---
 

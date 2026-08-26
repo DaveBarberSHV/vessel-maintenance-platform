@@ -13,7 +13,7 @@ live test on your end · 🟡 planned, not yet built
 flowchart LR
     A["🔲 Google Drive<br/>Manual upload by Jared/Dave"] --> B["✅ Parse & chunk<br/>Tag with metadata"]
     B --> C["✅ Embed chunks<br/>Voyage AI"]
-    C --> D["✅ Vector store<br/>Chroma DB"]
+    C --> D["✅ Vector store<br/>Supabase Postgres + pgvector"]
 ```
 
 - **Google Drive** — real shared folder in active use (`Drivetrain TMs`).
@@ -37,17 +37,21 @@ flowchart LR
   production documents broke the earlier approach — see `BACKLOG.md` for
   the full story of that fix. TF-IDF remains available via `--engine tfidf`
   for offline testing without an API key.
-- **Vector store** — Chroma. **21 documents, ~5,300+ chunks** ingested as of
-  Aug 2026 (grew from an initial 14-document library after Jared's second
-  real TM batch). `scan_folder.py`'s incremental add/rename/delete path has
-  been extensively live-tested at this point — see resolved backlog
-  entries. **Known constraint, actively causing friction (see `BACKLOG.md`,
-  priority item):** the Chroma database is currently committed directly to
-  git as a deployment stopgap so the hosted app can read it — this is
-  straining as the library grows (a recent push warned about exceeding
-  GitHub's recommended file-size guideline, and an automatic redeploy
-  didn't pick up new data without a manual reboot). Migrating to Supabase's
-  `pgvector` is the planned real fix — see the Front end section below.
+- **Vector store — Supabase Postgres + `pgvector`.** Migrated Aug 2026 from
+  local Chroma, which had been committed directly to git as a deployment
+  stopgap; that stopgap strained badly as the library grew (a 58.92 MB
+  file, a redeploy that needed a manual reboot to pick up new data) — see
+  `BACKLOG.md` for the full story. Migration copied all 5,386 existing
+  chunks and their already-computed embeddings directly out of the old
+  Chroma database into a new `tm_chunks` table — no Voyage re-embedding
+  needed. Verified at every layer: unit tests, a real full-data migration,
+  local and deployed live queries, and the exact original hard test
+  question repeated successfully. `scan_folder.py`'s incremental
+  add/rename/delete path now writes to Postgres directly — the same
+  `SUPABASE_DB_URL` secret already used for chat history, no new
+  deployment config needed. No approximate-nearest-neighbor index yet
+  (plain exact search) — fine at this library's scale (thousands of
+  chunks), revisit only if query latency ever actually becomes a problem.
 
 ## Query time (engineer asks a question, gets a cited answer)
 
@@ -122,9 +126,6 @@ fixed against production data (see `BACKLOG.md`).
 
 ## Not yet on this diagram (known future moves)
 
-- **🔺 Top priority for next session:** migrate vector storage from
-  git-committed Chroma to Supabase `pgvector` — see the priority backlog
-  entry for why this has become urgent rather than theoretical.
 - A real password/access gate before the wider crew gets the URL
 - A live Google Drive connector, if/when one becomes available
 - OCR/vision-based extraction for scanned reference docs and drawings —
@@ -139,7 +140,10 @@ fixed against production data (see `BACKLOG.md`).
 - **V2 idea, not yet scoped:** storing maintenance/troubleshooting field
   notes and findings from real engineers, tied to specific equipment —
   directly influenced the choice of Supabase (Postgres + `pgvector`) over
-  a simpler option, so this remains straightforward to add later.
+  a simpler option, and now that `pgvector` is proven, working
+  infrastructure (not just a future possibility — it's the actual TM
+  vector store as of Aug 2026), this is even more straightforward to add
+  later than originally planned.
 
 See `BACKLOG.md` for the reasoning behind each deferred item, and
 `README.md` for the broader project state.
