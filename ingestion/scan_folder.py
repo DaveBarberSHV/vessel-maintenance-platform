@@ -2,16 +2,20 @@
 Incremental folder ingestion — scans a folder of TMs and processes only
 what's new or changed since the last run.
 
-Why this matters: without this, adding one new TM to a 20-file library
-would mean re-parsing and re-embedding all 20 every time — wasted time,
-and wasted Voyage API cost, for files that didn't change. This script
-keeps a manifest (manifest.json) recording a hash of each file it has
-already processed, so:
+Why this matters: without this, adding one new TM to a large library
+would mean re-parsing and re-embedding all of them every time — wasted
+time, and wasted Voyage API cost, for files that didn't change. This
+script keeps a manifest (manifest.json) recording a hash of each file it
+has already processed, so:
   - Unchanged files: skipped entirely, instantly.
   - New files: parsed, chunked, and embedded — only these hit the Voyage API.
   - Changed files (e.g. a TM replaced with a new revision): the OLD chunks
-    for that file are removed (from chunks.jsonl and from the Chroma
+    for that file are removed (from chunks.jsonl and from the Postgres
     index) before the new version is processed, so nothing stale lingers.
+
+Storage: Supabase Postgres + pgvector (migrated Aug 2026 from local
+Chroma, which had to be committed to git for the deployed app to reach
+it — see BACKLOG.md for why that stopped scaling).
 
 Relies on the naming convention (see docs/naming_convention discussion):
     [System]_[Manufacturer]_[Model]_[DocType]_Rev[X].pdf
@@ -24,7 +28,6 @@ quick rename.
 
 Usage:
     python scan_folder.py /path/to/your/Drive/Drivetrain-TMs
-    python scan_folder.py /path/to/folder --engine tfidf   # for offline testing
 """
 
 import hashlib
@@ -37,9 +40,8 @@ from pathlib import Path
 import pdfplumber
 
 from parse_and_chunk import chunk_document
-from retrieval import TfidfEmbedder, VoyageEmbedder, db_path, get_voyage_key, COLLECTION_NAME
-
-import chromadb
+from retrieval import (VoyageEmbedder, get_voyage_key, get_pg_connection,
+                        ensure_pg_schema, upsert_chunks, delete_chunks)
 
 MANIFEST_PATH = Path(__file__).parent / "manifest.json"
 CHUNKS_PATH = Path(__file__).parent / "chunks.jsonl"
@@ -239,12 +241,13 @@ def scan_folder(folder: Path, engine: str = "voyage"):
         print("\nNothing to do.")
         return
 
-    # Set up Chroma collection for incremental add (and delete, for updates)
-    path_db = db_path(engine)
-    path_db.mkdir(parents=True, exist_ok=True)
+    # Postgres connection for incremental add/delete — migrated Aug 2026
+    # from local Chroma, which had to be committed to git for the deployed
+    # app to reach it; that stopgap strained badly as the library grew.
+    # See BACKLOG.md.
     embedder = get_embedder(engine)
-    client = chromadb.PersistentClient(path=str(path_db))
-    collection = client.get_or_create_collection(COLLECTION_NAME, embedding_function=embedder)
+    conn = get_pg_connection()
+    ensure_pg_schema(conn)
 
     new_chunk_count = 0
     failed_during_processing = []
@@ -270,7 +273,7 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                 old_chunk_ids = manifest[old_key]["chunk_ids"]
                 chunks = [c for c in chunks if c["chunk_id"] not in old_chunk_ids]
                 try:
-                    collection.delete(ids=old_chunk_ids)
+                    delete_chunks(conn, old_chunk_ids)
                 except Exception:
                     pass  # ids may not all exist if index was rebuilt separately; safe to ignore
                 reason = "renamed from" if renamed_from else "superseded revision of"
@@ -282,8 +285,8 @@ def scan_folder(folder: Path, engine: str = "voyage"):
             text_chunks = [c for c in file_chunks if c.has_text_layer and c.text.strip()]
 
             if text_chunks:
-                # Compute embeddings ourselves first (rather than letting
-                # collection.add() trigger it) so we can filter out any
+                # Compute embeddings ourselves first (rather than inside
+                # the upsert) so we can filter out any
                 # chunk VoyageEmbedder flags as too large to embed at all
                 # (see its MAX_SINGLE_CHUNK_CHARS) BEFORE storing anything
                 # — added Aug 2026 after a real oversized chunk broke a
@@ -293,11 +296,10 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                 oversized = set(getattr(embedder, "oversized_indices", []))
 
                 keep = [i for i in range(len(text_chunks)) if i not in oversized]
-                collection.add(
-                    ids=[text_chunks[i].chunk_id for i in keep],
-                    documents=[text_chunks[i].text for i in keep],
-                    embeddings=[embeddings[i] for i in keep],
-                    metadatas=[{
+                keep_chunks = [
+                    {
+                        "chunk_id": text_chunks[i].chunk_id,
+                        "text": text_chunks[i].text,
                         "document_title": text_chunks[i].document_title,
                         "revision": text_chunks[i].revision,
                         "page_number": text_chunks[i].page_number,
@@ -305,8 +307,10 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                         "equipment_model": text_chunks[i].equipment_model,
                         "document_type": text_chunks[i].document_type,
                         "source_file": text_chunks[i].source_file,
-                    } for i in keep],
-                )
+                    }
+                    for i in keep
+                ]
+                upsert_chunks(conn, keep_chunks, [embeddings[i] for i in keep])
                 if oversized:
                     pages = sorted({text_chunks[i].page_number for i in oversized})
                     print(f"  WARNING: {len(oversized)} chunk(s) too large to embed "
@@ -335,6 +339,7 @@ def scan_folder(folder: Path, engine: str = "voyage"):
 
     save_chunks(chunks)
     save_manifest(manifest)
+    conn.close()
     print(f"\nDone. {new_chunk_count} chunks added/updated across "
           f"{len(to_process) - len(failed_during_processing)} file(s). "
           f"{len(unchanged)} file(s) untouched.")
