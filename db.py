@@ -52,8 +52,22 @@ def get_db_url() -> str:
 def get_connection():
     """New connection per call, deliberately — callers (app.py) are
     expected to cache this via st.cache_resource so it's created once per
-    session, not once per script rerun."""
-    return psycopg2.connect(get_db_url())
+    session, not once per script rerun.
+
+    autocommit=True (Aug 2026, after a real incident): without this, every
+    statement — including plain reads like list_conversations() — silently
+    opens a transaction that only closes when something later calls
+    .commit(). Since this connection is long-lived (cached for the whole
+    browser session, reused across many reads and writes), a session that
+    ends abruptly right after a read — the app crashing, or just being
+    force-stopped during local testing — leaves that transaction stranded
+    on the server indefinitely. A real one sat "idle in transaction" for
+    almost 6 hours and silently blocked every new session's schema-check
+    step from completing, which looked exactly like unexplained hanging/
+    slowness with no error message. See BACKLOG.md."""
+    conn = psycopg2.connect(get_db_url())
+    conn.autocommit = True
+    return conn
 
 
 def ensure_schema(conn):
