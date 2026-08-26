@@ -5,6 +5,84 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## ✅ RESOLVED (mostly) — Page images: view the actual diagram/table for a citation
+
+**What:** Real problem, raised by Dave (Aug 2026): a 1415-page parts manual
+documents each part as a table + exploded-view diagram, sometimes split
+across "1 of 2 / 2 of 2" pages. Text extraction alone loses the diagram —
+which callout number is which part, how pieces connect — even though the
+table text extracts fine. Other TMs have diagrams embedded directly on
+text-bearing pages too.
+
+**Built (Aug 2026):** `ingestion/page_images.py` renders selected pages to
+PNG (via `pdfplumber`'s page rasterization — confirmed good quality: fully
+readable text, crisp diagrams, ~70KB/page) and uploads them to Supabase
+Storage. A new `page_image_url` column on `tm_chunks` links each chunk to
+its page's image, when one exists. The app shows a "🖼️ View page image(s)"
+expander under any answer citing a rendered page; the CLI prints the same
+URLs for testing.
+
+**Why images are rendered at ingestion time, not on-demand:** the deployed
+app never has access to the original PDF files — only extracted text
+(in Postgres since the pgvector migration). Images have to be produced
+once, wherever the real PDF bytes are (Dave's machine), and uploaded
+somewhere the deployed app can reach.
+
+**Which pages get rendered — not blindly every page:** a page is selected
+if it has real text, OR either adjacent page does. This specifically
+protects the "picture continues on the next page with little/no text of
+its own" pattern (Dave's exact example) from being skipped by a naive
+"only pages with text" rule, while still skipping genuinely blank pages.
+
+**Deliberately deferred, discussed and parked (Aug 2026):** "can I see the
+whole TM for this system?" — a real, different feature (viewing an entire
+document, not one page). Likely easy path later: upload the original PDF
+itself (once per document, not per page) and link to it directly, letting
+the browser's own PDF viewer handle navigation. Not attempted now — solving
+it today risked either re-rendering every page anyway (undoing the
+storage savings from being selective) or building a second, different
+mechanism alongside this one.
+
+**Real gotcha worth recording — Supabase's newer API key format doesn't
+work with Storage:** Supabase's current "Secret keys" (format `sb_secret_...`)
+failed against the Storage API with a cryptic `"Invalid Compact JWS"` /
+403 error. The fix: use the **legacy `service_role` key** instead (format
+`eyJ...`, a classic JWT) — found under the "Legacy anon, service_role API
+keys" tab on the same Settings → API page. `SUPABASE_SERVICE_KEY` in
+secrets/env needs to be this legacy-format key, not the new one, until/
+unless Supabase's Storage API adds support for the newer format.
+
+**Verified working end-to-end (Aug 2026):** real page rendered, real
+upload to Supabase Storage, real citation with a working public URL,
+image displayed correctly both via direct URL and inline in the deployed
+Streamlit app (confirmed against the SKF bearing housing reference doc —
+the rendered page matched the answer's content exactly).
+
+**Still open:**
+- **Backfill for the other ~20 already-ingested documents** — only the
+  one test document has images so far; existing documents only get images
+  when they're next re-ingested (a rename or content update), not
+  automatically. A deliberate backfill decision/script is still needed if
+  Dave wants the whole existing library covered, not just new additions
+  going forward.
+- **A real performance concern surfaced during testing** — the app hit a
+  Postgres statement timeout on the (unrelated, simple) chat-history
+  query right after this work, and general response slowness. Not yet
+  root-caused: possibly Supabase's free tier pausing the whole project
+  after inactivity (same pattern seen with Streamlit Cloud earlier — see
+  the resolved deployment-stopgap entry), possibly the `tm_chunks` table's
+  lack of an approximate-nearest-neighbor index becoming a real problem
+  rather than a theoretical one now that Storage calls are also happening.
+  Next step: check the Supabase dashboard for a paused/restoring status,
+  and get a real timed measurement of a retrieval query
+  (`time python retrieval.py query "..." --engine voyage`) to tell the
+  two apart.
+- **No storage-size/cost monitoring set up yet** for the images bucket —
+  worth a periodic glance at Supabase's dashboard as the library grows,
+  same as the existing recommendation for Voyage/Anthropic usage.
+
+---
+
 ## ✅ RESOLVED — Deployed! Voyage embedding batching broke on real large documents
 
 **What:** First deploy to Streamlit Community Cloud (Aug 2026) succeeded.

@@ -14,6 +14,7 @@ flowchart LR
     A["🔲 Google Drive<br/>Manual upload by Jared/Dave"] --> B["✅ Parse & chunk<br/>Tag with metadata"]
     B --> C["✅ Embed chunks<br/>Voyage AI"]
     C --> D["✅ Vector store<br/>Supabase Postgres + pgvector"]
+    B --> E["✅ Page images<br/>Supabase Storage"]
 ```
 
 - **Google Drive** — real shared folder in active use (`Drivetrain TMs`).
@@ -49,9 +50,28 @@ flowchart LR
   question repeated successfully. `scan_folder.py`'s incremental
   add/rename/delete path now writes to Postgres directly — the same
   `SUPABASE_DB_URL` secret already used for chat history, no new
-  deployment config needed. No approximate-nearest-neighbor index yet
-  (plain exact search) — fine at this library's scale (thousands of
-  chunks), revisit only if query latency ever actually becomes a problem.
+  deployment config needed. **No approximate-nearest-neighbor index yet
+  (plain exact search) — a real performance question is open as of Aug
+  2026 (see `BACKLOG.md`), not yet root-caused between "Supabase free
+  tier cold start" and "this needs a real index after all."**
+- **Page images — Supabase Storage.** Added Aug 2026 — real motivating
+  case: a 1415-page parts manual where diagrams (sometimes on a following
+  "1 of 2 / 2 of 2" page) carry information plain text extraction can't
+  capture. `ingestion/page_images.py` renders selected pages to PNG at
+  ingestion time (the deployed app has no access to original PDFs, so
+  this can't happen lazily at query time) and uploads them to a public
+  Storage bucket. Selection logic: a page renders if it or either
+  neighbor has real text — protects picture-only continuation pages from
+  being skipped, without rendering every page of every document. Fully
+  optional at the code level — a normal `scan_folder.py` run works
+  identically whether or not Storage credentials are configured, verified
+  directly. **Real gotcha, see `BACKLOG.md`:** Supabase's newer
+  `sb_secret_...` API key format fails against the Storage API; the
+  classic JWT-format legacy `service_role` key is required instead.
+  Verified end-to-end with a real document (rendered, uploaded, cited,
+  displayed correctly both via direct URL and inline in the app).
+  **Still open:** no backfill yet for ~20 already-ingested documents —
+  see `BACKLOG.md`.
 
 ## Query time (engineer asks a question, gets a cited answer)
 
