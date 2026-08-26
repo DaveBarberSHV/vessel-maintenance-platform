@@ -249,6 +249,26 @@ def scan_folder(folder: Path, engine: str = "voyage"):
     conn = get_pg_connection()
     ensure_pg_schema(conn)
 
+    # Page images (Aug 2026) — optional: Storage credentials are separate
+    # from the database connection above (SUPABASE_URL/SUPABASE_SERVICE_KEY,
+    # not SUPABASE_DB_URL), and not everyone running this script will have
+    # them set up yet. Rather than make this a hard requirement, it's
+    # silently skipped if unavailable — text/embedding ingestion (the core
+    # feature) keeps working exactly as before either way. See page_images.py.
+    images_enabled = False
+    try:
+        import page_images
+        page_images.get_supabase_storage_config()  # just checks the env vars are set, doesn't call the network
+        page_images.ensure_storage_bucket()
+        images_enabled = True
+    except ValueError:
+        print("Note: SUPABASE_URL/SUPABASE_SERVICE_KEY not set — skipping page image "
+              "rendering this run (text/embedding ingestion is unaffected). See "
+              "docs/architecture.md if you want to enable page images.\n")
+    except Exception as e:
+        print(f"Note: page image storage isn't reachable right now ({e}) — skipping "
+              f"page image rendering this run (text/embedding ingestion is unaffected).\n")
+
     new_chunk_count = 0
     failed_during_processing = []
 
@@ -296,6 +316,20 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                 oversized = set(getattr(embedder, "oversized_indices", []))
 
                 keep = [i for i in range(len(text_chunks)) if i not in oversized]
+
+                # Page images (Aug 2026) — see setup note above and
+                # page_images.py for the selection logic and why this
+                # happens here (real PDF bytes are only available at
+                # ingestion time, on this machine).
+                page_image_urls = {}
+                if images_enabled:
+                    pages_with_text = {c.page_number for c in text_chunks}
+                    total_pages = file_chunks[0].total_pages if file_chunks else 0
+                    page_image_urls = page_images.render_and_upload_selected_pages(
+                        path, path.name, pages_with_text, total_pages)
+                    if page_image_urls:
+                        print(f"  {len(page_image_urls)} page image(s) rendered and uploaded.")
+
                 keep_chunks = [
                     {
                         "chunk_id": text_chunks[i].chunk_id,
@@ -307,6 +341,7 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                         "equipment_model": text_chunks[i].equipment_model,
                         "document_type": text_chunks[i].document_type,
                         "source_file": text_chunks[i].source_file,
+                        "page_image_url": page_image_urls.get(text_chunks[i].page_number),
                     }
                     for i in keep
                 ]

@@ -122,14 +122,36 @@ if "messages" not in st.session_state:
 
 
 def render_assistant_extras(message: dict, key_prefix: str):
-    """Sources caption, 👍/👎 feedback, and copy options — shared by both
-    historical messages (loaded from the sidebar) and the live answer
-    just generated, so they always look and behave identically.
-    key_prefix must be unique per message (message id if saved, or the
-    live index) since Streamlit widgets need stable, unique keys."""
+    """Sources caption, page images, 👍/👎 feedback, and copy options —
+    shared by both historical messages (loaded from the sidebar) and the
+    live answer just generated, so they always look and behave
+    identically. key_prefix must be unique per message (message id if
+    saved, or the live index) since Streamlit widgets need stable,
+    unique keys."""
     chunks = message.get("chunks")
     if chunks:
         st.caption(format_sources(chunks).replace("\n", "  \n"))
+
+    # Page images (Aug 2026) — lets the user see the actual source page,
+    # including diagrams/exploded views that plain text can't fully
+    # convey. Only appears for pages that were selected for rendering at
+    # ingestion time — see page_images.py. De-duplicated the same way
+    # format_sources() dedupes citations (a dense-table sub-chunk shares
+    # its page's image with the main page chunk).
+    image_entries = []
+    seen_images = set()
+    for c in (chunks or []):
+        m = c["metadata"]
+        url = m.get("page_image_url")
+        if url and url not in seen_images:
+            seen_images.add(url)
+            image_entries.append((m["document_title"], m["page_number"], url))
+    if image_entries:
+        label = f"🖼️ View page image{'s' if len(image_entries) > 1 else ''} ({len(image_entries)})"
+        with st.expander(label):
+            for doc_title, page_num, url in image_entries:
+                st.caption(f"{doc_title}, p. {page_num}")
+                st.image(url)
 
     message_id = message.get("id")
     if db_available and message_id is not None:

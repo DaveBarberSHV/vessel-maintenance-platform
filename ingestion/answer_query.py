@@ -238,6 +238,21 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
     if sources:
         print(f"\n{sources}")
 
+    # Page images (Aug 2026) — printed separately from format_sources()
+    # since a URL isn't part of a citation line itself, just useful CLI
+    # debug output. See page_images.py.
+    seen_images = set()
+    image_lines = []
+    for c in result["chunks"]:
+        url = c["metadata"].get("page_image_url")
+        if url and url not in seen_images:
+            seen_images.add(url)
+            image_lines.append(f'- {c["metadata"]["document_title"]}, '
+                                f'p. {c["metadata"]["page_number"]}: {url}')
+    if image_lines:
+        print("\nPage images:")
+        print("\n".join(image_lines))
+
 
 if __name__ == "__main__":
     args = sys.argv[1:]

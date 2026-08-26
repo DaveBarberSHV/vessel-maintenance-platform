@@ -177,6 +177,14 @@ def ensure_pg_schema(conn):
                 source_file TEXT NOT NULL
             );
         """)
+        # Added Aug 2026 for the page-images feature — see page_images.py.
+        # Nullable: most chunks won't have one (only pages selected by
+        # should_render_page() do), and existing chunks from before this
+        # feature don't have it at all yet.
+        cur.execute(f"""
+            ALTER TABLE {PG_TABLE}
+                ADD COLUMN IF NOT EXISTS page_image_url TEXT;
+        """)
         cur.execute(f"""
             CREATE INDEX IF NOT EXISTS idx_{PG_TABLE}_source_file
                 ON {PG_TABLE} (source_file);
@@ -205,7 +213,7 @@ def upsert_chunks(conn, chunks: list[dict], embeddings: list[list[float]]):
             c["chunk_id"], c["text"], _vec_literal(emb),
             c["document_title"], c["revision"], c["page_number"],
             c.get("total_pages"), c["equipment_model"], c["document_type"],
-            c["source_file"],
+            c["source_file"], c.get("page_image_url"),
         )
         for c, emb in zip(chunks, embeddings)
     ]
@@ -215,7 +223,8 @@ def upsert_chunks(conn, chunks: list[dict], embeddings: list[list[float]]):
             f"""
             INSERT INTO {PG_TABLE}
                 (chunk_id, text, embedding, document_title, revision,
-                 page_number, total_pages, equipment_model, document_type, source_file)
+                 page_number, total_pages, equipment_model, document_type,
+                 source_file, page_image_url)
             VALUES %s
             ON CONFLICT (chunk_id) DO UPDATE SET
                 text = EXCLUDED.text,
@@ -226,10 +235,11 @@ def upsert_chunks(conn, chunks: list[dict], embeddings: list[list[float]]):
                 total_pages = EXCLUDED.total_pages,
                 equipment_model = EXCLUDED.equipment_model,
                 document_type = EXCLUDED.document_type,
-                source_file = EXCLUDED.source_file
+                source_file = EXCLUDED.source_file,
+                page_image_url = EXCLUDED.page_image_url
             """,
             rows,
-            template="(%s, %s, %s::vector, %s, %s, %s, %s, %s, %s, %s)",
+            template="(%s, %s, %s::vector, %s, %s, %s, %s, %s, %s, %s, %s)",
         )
     conn.commit()
 
@@ -334,7 +344,7 @@ def query_chunks(question: str, engine: str = "voyage", top_k: int = 5) -> list[
             cur.execute(
                 f"""
                 SELECT text, document_title, revision, page_number, total_pages,
-                       equipment_model, document_type, source_file,
+                       equipment_model, document_type, source_file, page_image_url,
                        embedding <=> %s::vector AS distance
                 FROM {PG_TABLE}
                 ORDER BY embedding <=> %s::vector
@@ -356,6 +366,7 @@ def query_chunks(question: str, engine: str = "voyage", top_k: int = 5) -> list[
                     "equipment_model": r["equipment_model"],
                     "document_type": r["document_type"],
                     "source_file": r["source_file"],
+                    "page_image_url": r["page_image_url"],
                 },
                 "distance": r["distance"],
             }
