@@ -6,41 +6,52 @@ generator/HVAC/fire/electrical/steering/hydraulics manuals, OEM service
 bulletins, SMS procedures) — with precise citations back to the source
 document, revision, and page.
 
+**New to this project (including a fresh Claude session)? Read
+`docs/working_with_dave.md` first** for how to collaborate effectively,
+then `docs/architecture.md` for the current technical state.
+
 ## Status
 
-Prototype phase. Single vessel combo (110' tug + 450' LNG bunkering barge,
-Master Boat Builders Hull 469 / Order 7396A1). ~20–30 TMs expected; three
-loaded so far as test corpus.
+Live and in real use. Single vessel combo (110' tug + 450' LNG bunkering
+barge, Master Boat Builders Hull 469 / Order 7396A1). Deployed to
+Streamlit Community Cloud, used daily by Dave and Jared, with real
+crew rollout planned. ~30 TMs ingested so far, growing regularly as
+Jared uploads more. See `docs/architecture.md` for the current, actively
+maintained architecture diagram — this section intentionally stays brief
+since that's the source of truth for technical state.
 
-## Architecture (decided so far)
+## Architecture (see `docs/architecture.md` for full current detail)
 
-- **Document flow:** TMs live in a shared document store (Google Drive
-  assumed; no live connector yet — manual handling for prototype).
-- **Ingestion pipeline** (`ingestion/parse_and_chunk.py`): parse PDF → chunk
-  by page → tag with metadata (vessel, equipment model, document type,
-  revision, page number) → generate embeddings → store with metadata.
-- **Query-time flow:** engineer asks a question in the app → backend runs a
-  vector search against indexed chunks → backend sends question + retrieved
-  chunks to the Claude API → Claude drafts a concise, cited answer → app
-  displays it. The engineer's browser only ever talks to the app/backend,
-  never directly to Claude or the vector store.
-- **Vector store:** embedded Chroma inside the backend service (no separate
-  hosting) — sufficient at current scale (tens of thousands of chunks).
-- **Citation granularity:** document + revision + page number (see
-  `BACKLOG.md` for the path to section-level citations later).
+- **Ingestion pipeline** (`ingestion/scan_folder.py`): parse PDF → chunk
+  by page → tag with metadata → generate embeddings (Voyage AI) → store
+  in Supabase Postgres (`pgvector`). Also renders page images to Supabase
+  Storage, and extracts a structured vessel equipment registry from
+  reference documents.
+- **Query-time flow:** engineer asks a question in the Streamlit app →
+  vector search against indexed chunks + the vessel equipment registry →
+  Claude synthesizes a concise, cited answer, with page images available
+  on request.
+- **Vector store:** Supabase Postgres + `pgvector` (migrated from local
+  Chroma — see `BACKLOG.md` for why).
+- **Citation granularity:** document + revision + page number (confirmed
+  sufficient by real user feedback — section-level citations deliberately
+  not pursued, see `BACKLOG.md`).
 
 ## Repo layout
 
 ```
-ingestion/          parse -> chunk -> tag pipeline
-docs/               project brief, design notes
-BACKLOG.md           deferred items and why
+ingestion/          parse -> chunk -> tag -> embed -> store pipeline
+docs/               architecture, working notes, project brief
+app.py              Streamlit front end
+db.py               chat history persistence (Supabase Postgres)
+BACKLOG.md          deferred items, real bugs found/fixed, and why
 ```
 
 ## Open items
 
-See `BACKLOG.md` for deferred engineering decisions, `docs/architecture.md`
-for the current (evolving) architecture diagram, `docs/tm_upload_checklist.md`
-for what makes a good file to add to the TM library, `docs/monday_discussion_guide.md`
-for re-grounding on end-user needs with Jared, and the project brief in
-`docs/` for people/roles and full scope.
+See `BACKLOG.md` for deferred engineering decisions and the real story
+behind bugs found and fixed, `docs/architecture.md` for the current
+(actively maintained) architecture diagram, `docs/tm_upload_checklist.md`
+for what makes a good file to add to the TM library, and
+`docs/working_with_dave.md` for how to collaborate effectively on this
+project.
