@@ -32,6 +32,7 @@ Usage:
 
 import hashlib
 import json
+import os
 import re
 import sys
 from dataclasses import asdict
@@ -65,6 +66,8 @@ DOCTYPE_LABELS = {
     "SERVICEBULLETIN": "Service Bulletin",
     "WIRINGDIAGRAM": "Wiring Diagram",
     "REFDATA": "Reference Data",
+    "EQUIPMENTLIST": "Equipment List",  # triggers automatic vessel_equipment
+    # extraction too, in addition to normal chunking — see extract_equipment_list.py
 }
 
 
@@ -269,6 +272,24 @@ def scan_folder(folder: Path, engine: str = "voyage"):
         print(f"Note: page image storage isn't reachable right now ({e}) — skipping "
               f"page image rendering this run (text/embedding ingestion is unaffected).\n")
 
+    # Vessel equipment registry (Aug 2026) — optional: needs
+    # ANTHROPIC_API_KEY in addition to what's already required above. Any
+    # file with doctype EquipmentList gets its content extracted into the
+    # vessel_equipment table automatically, in addition to normal chunking
+    # (so it's also searchable as a regular TM chunk, same as everything
+    # else). See extract_equipment_list.py and BACKLOG.md.
+    equipment_enabled = False
+    try:
+        import extract_equipment_list
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise ValueError("ANTHROPIC_API_KEY not set")
+        extract_equipment_list.ensure_equipment_schema(conn)
+        equipment_enabled = True
+    except Exception as e:
+        print(f"Note: vessel equipment extraction isn't available right now ({e}) — "
+              f"skipping for any EquipmentList documents this run (normal chunking is "
+              f"unaffected). See docs/architecture.md.\n")
+
     new_chunk_count = 0
     failed_during_processing = []
 
@@ -363,6 +384,20 @@ def scan_folder(folder: Path, engine: str = "voyage"):
             }
             print(f"  {len(file_chunks)} chunks ({len(text_chunks)} embedded, "
                   f"{len(file_chunks) - len(text_chunks)} metadata-only — no text layer)")
+
+            # Vessel equipment registry (Aug 2026) — in addition to normal
+            # chunking above, an EquipmentList document also gets its
+            # content extracted into the vessel_equipment table. See setup
+            # note near the top of this function and extract_equipment_list.py.
+            if equipment_enabled and metadata["document_type"] == "Equipment List":
+                try:
+                    entries = extract_equipment_list.extract_equipment(path)
+                    extract_equipment_list.upsert_equipment(conn, entries, path.name)
+                    print(f"  {len(entries)} vessel equipment entries extracted and upserted.")
+                except Exception as e:
+                    print(f"  WARNING: equipment extraction failed for this file "
+                          f"({type(e).__name__}: {e}) — normal chunking above still "
+                          f"succeeded, only the structured equipment registry update failed.")
 
         except Exception as e:
             # One bad file should never take down the whole batch. Report
