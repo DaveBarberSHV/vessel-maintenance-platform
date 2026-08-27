@@ -106,17 +106,24 @@ who wants prose. Use numbered steps when the excerpt describes a procedure.
 - Do not include a "Sources" list in your answer — the application displays \
 sources separately, generated directly from the actual retrieved excerpts \
 rather than from your own summary of them.
+- If a "Vessel equipment currently installed" list is provided, use it to \
+determine which model/variant actually applies when a manual covers multiple \
+options — the vessel only has one of them installed, so there's no need to \
+ask the user which one unless the registry itself doesn't resolve it (e.g. \
+the equipment isn't in the list at all, or the manual's variants don't map \
+cleanly to what's listed).
 """
 
 
-def build_prompt(question: str, chunks: list[dict]) -> str:
+def build_prompt(question: str, chunks: list[dict], equipment_context: str = "") -> str:
     excerpt_blocks = []
     for i, c in enumerate(chunks):
         citation = f'{c["metadata"]["document_title"]}, {c["metadata"]["revision"]}, p. {c["metadata"]["page_number"]}'
         excerpt_blocks.append(f"--- Excerpt {i+1} ({citation}) ---\n{c['text']}")
     excerpts = "\n\n".join(excerpt_blocks)
+    equipment_block = f"\n{equipment_context}\n" if equipment_context else ""
     return f"""Question: {question}
-
+{equipment_block}
 Manual excerpts retrieved for this question:
 
 {excerpts}
@@ -137,6 +144,14 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
     the top 3 for an imperfectly-phrased question; a slightly wider net
     costs a little more context but meaningfully reduces that risk.
 
+    Vessel equipment context (Aug 2026, see extract_equipment_list.py) is
+    fetched fresh on every call and always included when available — not
+    dependent on retrieval happening to find the equipment list document,
+    since a question rarely names the model explicitly (the asker assumes
+    the system already knows what's installed, same as a real engineer
+    would). Degrades silently to no equipment context if the registry is
+    empty or unreachable — this must never be the reason a question fails.
+
     Returns:
         {
             "answer": str,        # Claude's synthesized response text
@@ -154,7 +169,18 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
     """
     search_query = expand_units(question)
     chunks = query_chunks(search_query, engine=engine, top_k=top_k)
-    prompt = build_prompt(question, chunks)
+
+    equipment_context = ""
+    try:
+        from retrieval import get_pg_connection
+        from extract_equipment_list import get_equipment_list, format_equipment_list
+        eq_conn = get_pg_connection()
+        equipment_context = format_equipment_list(get_equipment_list(eq_conn))
+        eq_conn.close()
+    except Exception:
+        pass  # equipment context is an enhancement, never a reason a question fails
+
+    prompt = build_prompt(question, chunks, equipment_context)
 
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
@@ -219,7 +245,16 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
     if dry_run:
         search_query = expand_units(question)
         chunks = query_chunks(search_query, engine=engine, top_k=top_k)
-        prompt = build_prompt(question, chunks)
+        equipment_context = ""
+        try:
+            from retrieval import get_pg_connection
+            from extract_equipment_list import get_equipment_list, format_equipment_list
+            eq_conn = get_pg_connection()
+            equipment_context = format_equipment_list(get_equipment_list(eq_conn))
+            eq_conn.close()
+        except Exception:
+            pass
+        prompt = build_prompt(question, chunks, equipment_context)
         print("=== SYSTEM PROMPT ===")
         print(SYSTEM_PROMPT)
         if search_query != question:

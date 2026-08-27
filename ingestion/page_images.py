@@ -58,16 +58,23 @@ def ensure_storage_bucket():
     call every time, mirrors the ensure_pg_schema() pattern used for the
     Postgres table. Bucket is public: consistent with the app's current
     security posture (no password gate yet either — see BACKLOG.md), and
-    page images aren't sensitive on their own."""
+    page images aren't sensitive on their own.
+
+    "Already exists" detection checks the response body, not just the
+    HTTP status — a real case (Aug 2026) showed Supabase returning this
+    as HTTP 400 with a "BucketAlreadyExists" code in the JSON body,
+    rather than a straightforward 409 status."""
     url, key = get_supabase_storage_config()
     resp = requests.post(
         f"{url}/storage/v1/bucket",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         json={"id": STORAGE_BUCKET, "name": STORAGE_BUCKET, "public": True},
     )
-    # 409 = bucket already exists, which is fine and expected on every run after the first.
-    if resp.status_code not in (200, 201, 409):
-        raise RuntimeError(f"Failed to create/verify storage bucket: {resp.status_code} {resp.text}")
+    if resp.status_code in (200, 201):
+        return
+    if "BucketAlreadyExists" in resp.text or "already exists" in resp.text.lower():
+        return
+    raise RuntimeError(f"Failed to create/verify storage bucket: {resp.status_code} {resp.text}")
 
 
 def should_render_page(page_number: int, pages_with_text: set[int]) -> bool:
