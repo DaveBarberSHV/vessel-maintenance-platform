@@ -5,6 +5,64 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## ✅ RESOLVED — Vessel equipment registry: know which model applies without asking
+
+**What:** Real problem, raised by Dave (Aug 2026): Jared sent a one-page
+document listing the actual drivetrain equipment installed on the vessel
+(model, serial, key specs) — separate from any single TM, since TMs cover
+a manufacturer's full model range but the vessel only has one variant of
+each actually installed. A question like "what torque for the driveline
+bearing bolts?" was genuinely ambiguous without knowing which bearing
+housing was meant, even though a real engineer on the vessel would just
+know.
+
+**Built (Aug 2026):**
+- `ingestion/extract_equipment_list.py` — reads an equipment list document
+  and asks Claude to structure it into JSON (category, position,
+  manufacturer, model, serial, flexible specs) rather than hand-writing
+  parsing logic, since layouts will vary vessel to vessel and even
+  between revisions of the same vessel's document.
+- New `vessel_equipment` Postgres table, natural key `(category,
+  position)` — chosen specifically because equipment gets replaced (the
+  vessel is in the shipyard now); re-running extraction against an
+  updated document updates existing entries rather than duplicating or
+  leaving stale ones.
+- `answer_query.py` now fetches the full current registry on **every**
+  question, unconditionally — not dependent on retrieval happening to
+  find the equipment list document via search, since a question rarely
+  names the model explicitly. Degrades silently to no equipment context
+  if the table doesn't exist or the connection fails — verified directly
+  that this can never be the reason a question fails.
+- `scan_folder.py` — new `EquipmentList` doc type (naming convention:
+  `[System]_[Manufacturer/Vessel]_[Model]_EquipmentList_Rev[X].pdf`).
+  Any file with this doctype gets normal chunking (so it stays a regular
+  searchable TM too) **and** automatic registry extraction, in one pass —
+  no separate manual step needed going forward.
+
+**Verified end-to-end, real data throughout:**
+- Manual extraction against the real document: all 10 entries correct,
+  including correctly leaving manufacturer/model blank where the source
+  document didn't state one (e.g. the wheels — a spec, not a model
+  number) rather than guessing.
+- Real question, real before/after: "what torque for the driveline
+  bearing housing bolts?" went from *"you need to clarify which
+  assembly"* (two real, different bearing housings existed in the
+  library) to a direct, confident, correctly-sourced answer once the
+  registry was wired in.
+- Full automation confirmed via a real `scan_folder.py` run against the
+  actual 22-document library: extraction fired automatically, produced
+  the same 10 correct entries as the manual run, alongside normal
+  chunking and page-image rendering for the same file in one pass.
+
+**Deliberately not built (discussed, parked, not a decision to revisit
+soon):** a "notes" field/table for engineers to record real-world
+findings/peculiarities per piece of equipment — the same idea flagged
+back when Supabase/`pgvector` was first chosen. The registry's
+`(category, position)` identity gives a clean place for this to attach
+later; not scoped or built now, to keep today's feature focused.
+
+---
+
 ## ⚠️ Known operational gotcha — deploys silently need a manual reboot
 
 **What:** Twice now (Aug 2026) — once after a large data push (the
@@ -111,13 +169,16 @@ image displayed correctly both via direct URL and inline in the deployed
 Streamlit app (confirmed against the SKF bearing housing reference doc —
 the rendered page matched the answer's content exactly).
 
+**Backfill — done (Aug 2026):** ran `backfill_page_images.py` against the
+real library — ~2,228 images rendered and uploaded across 13 documents,
+including the 1,415-page parts manual. Also confirmed (Aug 2026): the SKF
+bearing housing document, which had been sitting under a leftover test
+filename since the original page-images testing, self-corrected
+automatically the next time a real `scan_folder.py` run encountered it —
+rename detection cleanly restored its real name and regenerated its
+images, exactly as predicted at the time and with no manual fix needed.
+
 **Still open:**
-- **Backfill for the other ~20 already-ingested documents** — only the
-  one test document has images so far; existing documents only get images
-  when they're next re-ingested (a rename or content update), not
-  automatically. A deliberate backfill decision/script is still needed if
-  Dave wants the whole existing library covered, not just new additions
-  going forward.
 - **No storage-size/cost monitoring set up yet** for the images bucket —
   worth a periodic glance at Supabase's dashboard as the library grows,
   same as the existing recommendation for Voyage/Anthropic usage.
