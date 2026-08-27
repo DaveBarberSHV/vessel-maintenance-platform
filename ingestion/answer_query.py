@@ -112,18 +112,46 @@ options — the vessel only has one of them installed, so there's no need to \
 ask the user which one unless the registry itself doesn't resolve it (e.g. \
 the equipment isn't in the list at all, or the manual's variants don't map \
 cleanly to what's listed).
+
+Clarifying questions — ask at most ONE per issue, never loop:
+- If, after considering the vessel equipment list above, the excerpts still \
+describe genuinely different things that the question could reasonably mean \
+(e.g. a generic term like "the pump" matches excerpts for two unrelated \
+pumps), and you have NOT already asked about this in the "Previous exchange" \
+below, ask ONE clarifying question — naming the specific real options found \
+in the excerpts, not a generic "could you clarify?"
+- If a "Previous exchange" section below shows you already asked a \
+clarifying question last turn, do NOT ask again under any circumstances — \
+this holds even if the newly retrieved excerpts for this follow-up are \
+noisy, unhelpful, or don't obviously address the reply (retrieval isn't \
+perfect, especially for a short reply). In that case, fall back to what \
+you already know from the previous exchange itself plus whatever's \
+genuinely useful in the new excerpts, clearly state what you're assuming \
+or what's still missing, and answer with that — never respond as if the \
+conversation is starting over.
 """
 
 
-def build_prompt(question: str, chunks: list[dict], equipment_context: str = "") -> str:
+def build_prompt(question: str, chunks: list[dict], equipment_context: str = "",
+                  previous_exchange: dict | None = None) -> str:
     excerpt_blocks = []
     for i, c in enumerate(chunks):
         citation = f'{c["metadata"]["document_title"]}, {c["metadata"]["revision"]}, p. {c["metadata"]["page_number"]}'
         excerpt_blocks.append(f"--- Excerpt {i+1} ({citation}) ---\n{c['text']}")
     excerpts = "\n\n".join(excerpt_blocks)
     equipment_block = f"\n{equipment_context}\n" if equipment_context else ""
+
+    history_block = ""
+    if previous_exchange:
+        history_block = f"""
+Previous exchange in this conversation (check: did you already ask a \
+clarifying question here? If so, do not ask another — see system prompt rules):
+User asked: "{previous_exchange['question']}"
+You answered: "{previous_exchange['answer']}"
+"""
+
     return f"""Question: {question}
-{equipment_block}
+{equipment_block}{history_block}
 Manual excerpts retrieved for this question:
 
 {excerpts}
@@ -132,7 +160,7 @@ Answer the question using only the excerpts above."""
 
 
 def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
-               api_key: str | None = None) -> dict:
+               api_key: str | None = None, previous_exchange: dict | None = None) -> dict:
     """The importable core of this module — used by both the CLI below and
     the Streamlit front end. Returns a dict rather than printing, and
     raises a normal exception rather than sys.exit()-ing, since this now
@@ -152,6 +180,15 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
     would). Degrades silently to no equipment context if the registry is
     empty or unreachable — this must never be the reason a question fails.
 
+    previous_exchange (Aug 2026, see BACKLOG.md's clarifying-question
+    entry): optional {"question": ..., "answer": ...} dict for the
+    immediately-prior turn only — not the whole conversation history,
+    deliberately, to keep this scoped to its one job (letting Claude tell
+    whether it already asked a clarifying question) rather than turning
+    into a general multi-turn memory feature. The caller (app.py) decides
+    whether to pass this; the CLI below does not by default, so plain CLI
+    testing remains single-shot/stateless unless a caller passes one in.
+
     Returns:
         {
             "answer": str,        # Claude's synthesized response text
@@ -167,7 +204,17 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
     Raises:
         ValueError if no Anthropic API key is available.
     """
-    search_query = expand_units(question)
+    # Search query includes the previous question too, when there is one
+    # (Aug 2026) — a reply to a clarifying question is often short ("the
+    # azimuth one", "port side"), and a couple of words alone often isn't
+    # enough signal for good retrieval. Combining with the original
+    # question gives the embedding real context to work with, without
+    # changing what's shown to Claude as "the question" in the prompt
+    # itself (build_prompt still receives the bare current question).
+    search_text = question
+    if previous_exchange and previous_exchange.get("question"):
+        search_text = f"{previous_exchange['question']} {question}"
+    search_query = expand_units(search_text)
     chunks = query_chunks(search_query, engine=engine, top_k=top_k)
 
     equipment_context = ""
@@ -180,7 +227,7 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
     except Exception:
         pass  # equipment context is an enhancement, never a reason a question fails
 
-    prompt = build_prompt(question, chunks, equipment_context)
+    prompt = build_prompt(question, chunks, equipment_context, previous_exchange)
 
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
@@ -238,12 +285,18 @@ def format_sources(chunks: list[dict]) -> str:
     return "Sources:\n" + "\n".join(lines) if lines else ""
 
 
-def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: int = 5):
+def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: int = 5,
+           previous_exchange: dict | None = None):
     """CLI-facing wrapper — keeps the exact command-line behavior/UX
     unchanged (dry-run printing, sys.exit on a missing key) while
-    delegating the real work to get_answer()."""
+    delegating the real work to get_answer(). previous_exchange support
+    added Aug 2026 specifically for debugging the clarifying-question
+    feature from the CLI, reproducing exactly what app.py would send."""
     if dry_run:
-        search_query = expand_units(question)
+        search_text = question
+        if previous_exchange and previous_exchange.get("question"):
+            search_text = f"{previous_exchange['question']} {question}"
+        search_query = expand_units(search_text)
         chunks = query_chunks(search_query, engine=engine, top_k=top_k)
         equipment_context = ""
         try:
@@ -254,17 +307,21 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
             eq_conn.close()
         except Exception:
             pass
-        prompt = build_prompt(question, chunks, equipment_context)
+        prompt = build_prompt(question, chunks, equipment_context, previous_exchange)
         print("=== SYSTEM PROMPT ===")
         print(SYSTEM_PROMPT)
         if search_query != question:
-            print(f"\n=== SEARCH QUERY (expanded from question) ===\n{search_query}")
+            print(f"\n=== SEARCH QUERY (expanded/combined) ===\n{search_query}")
+        print("\n=== RETRIEVED CHUNKS ===")
+        for i, c in enumerate(chunks):
+            m = c["metadata"]
+            print(f"[{i+1}] {m['document_title']}, p. {m['page_number']} (distance={c['distance']:.3f})")
         print("\n=== USER PROMPT (what would be sent) ===")
         print(prompt)
         return
 
     try:
-        result = get_answer(question, engine=engine, top_k=top_k)
+        result = get_answer(question, engine=engine, top_k=top_k, previous_exchange=previous_exchange)
     except ValueError as e:
         sys.exit(str(e))
 
@@ -299,6 +356,18 @@ if __name__ == "__main__":
         idx = args.index("--engine")
         engine = args[idx + 1]
         del args[idx:idx + 2]
+    previous_exchange = None
+    if "--previous-question" in args:
+        idx = args.index("--previous-question")
+        prev_q = args[idx + 1]
+        del args[idx:idx + 2]
+        prev_a = ""
+        if "--previous-answer" in args:
+            idx = args.index("--previous-answer")
+            prev_a = args[idx + 1]
+            del args[idx:idx + 2]
+        previous_exchange = {"question": prev_q, "answer": prev_a}
     if not args:
-        sys.exit('Usage: python answer_query.py [--engine voyage|tfidf] [--dry-run] "your question"')
-    answer(args[0], engine=engine, dry_run=dry_run)
+        sys.exit('Usage: python answer_query.py [--engine voyage|tfidf] [--dry-run] '
+                  '[--previous-question "..." --previous-answer "..."] "your question"')
+    answer(args[0], engine=engine, dry_run=dry_run, previous_exchange=previous_exchange)
