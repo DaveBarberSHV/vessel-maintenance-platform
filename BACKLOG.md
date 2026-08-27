@@ -297,45 +297,72 @@ immediately to avoid an unplanned full re-embedding of the whole library.
 
 ---
 
-## 🔺 REQUESTED — Ask a clarifying question instead of "not enough information" when a term is ambiguous
+## ✅ RESOLVED — Ask a clarifying question instead of "not enough information" when a term is ambiguous
 
 **What:** Real example (Aug 2026, Jared's first live test): asked "We have
 a bearing running at 220 degrees F. What is going to happen?" The manual
-covers several distinct bearing types (PTI bearing, Z-drive bearing,
-clutch bearing) with different fault thresholds each — the system correctly
-avoided guessing, but its "the excerpts don't contain enough information"
-response wasn't as helpful as it could have been. Dave's request: when the
-retrieved excerpts suggest the question could mean one of several specific
-things, ask the user to clarify which one — e.g. "There are multiple types
-of bearings covered in these manuals (PTI, Z-drive, clutch) — which one are
-you asking about?" — rather than just reporting insufficient information.
+covers several distinct bearing types with different fault thresholds each
+— the system correctly avoided guessing, but its "the excerpts don't
+contain enough information" response wasn't as helpful as it could have
+been. Dave's request: when the retrieved excerpts suggest the question
+could mean one of several specific things, ask the user to clarify which
+one, rather than just reporting insufficient information.
 
 **Constraint from Dave (Aug 2026):** at most **one** clarifying question per
-issue — never loop. If the user's next message doesn't resolve the
-ambiguity (or they don't/can't answer it directly), stop asking and answer
-using the best-matching TM reference instead, clearly noting the assumption
-made rather than asking again.
+issue — never loop. Revisited explicitly once more before building (Aug
+2026, after the vessel equipment registry landed): kept at one rather than
+raised, since the registry had already resolved a large share of what used
+to need clarification (which model/variant applies), narrowing what's left
+to genuinely open-ended cases less likely to benefit from a second round
+anyway — and Jared's original reasoning (busy users, terse writers, don't
+want a back-and-forth) still held.
 
-**Why deferred:** Requested live during Jared's second session (Aug 2026);
-Dave wants to bring a fuller batch of notes from that session before
-building this, rather than doing it as a one-off right now.
+**Built (Aug 2026), following almost exactly the approach outlined below:**
+- `SYSTEM_PROMPT` instructs Claude to ask one clarifying question grounded
+  in the actual distinct options visible in the retrieved excerpts (not a
+  generic "could you clarify?"), and — critically — to never ask a second
+  one, falling back to the most likely answer with a stated assumption even
+  when a follow-up reply doesn't fully resolve things or retrieval for that
+  follow-up turns out noisy.
+- `get_answer()`/`build_prompt()` accept an optional `previous_exchange`
+  (immediately-prior question + answer only, not full history — deliberately
+  scoped to just what's needed for Claude to tell "did I already ask here").
+  `app.py` constructs this from session state and passes it automatically.
+- Retrieval for a follow-up reply combines it with the *original* question
+  before searching — a short reply alone ("the driveline one") often isn't
+  enough signal on its own for good retrieval.
+- CLI debug support (`--previous-question`/`--previous-answer`) added
+  specifically to reproduce and inspect real conversation scenarios without
+  needing the full app.
 
-**Relationship to the Fahrenheit/Celsius fix (resolved, see below):** related
-but distinct. That fix improves whether the *right chunk gets retrieved at
-all*. This is about what Claude does *after* retrieval, when what came back
-is genuinely ambiguous between a few real, distinct things — a
-generation-time behavior change, not a retrieval change.
+**Verified with real evidence, several angles:**
+- A dry-run reproduction of a real live exchange confirmed the previous-
+  exchange context genuinely reaches the prompt correctly (not just written
+  but actually wired end to end).
+- That same dry-run surfaced a real, separate finding: a follow-up term
+  that doesn't exist anywhere in the current library can pull in noisy,
+  irrelevant retrieval (parts-list tables sharing a generic word like
+  "bearing") — this specifically motivated strengthening the fallback
+  instruction so the model never restarts the conversation even when
+  follow-up retrieval is poor, only that.
+- Live app testing (Aug 2026) across the real motivating example: the
+  system answered directly and correctly for content it had (the CAT
+  engine bearing limit, with correct °F/°C reasoning and an honest note
+  that the limit doesn't extend to other equipment), and — when a
+  follow-up used a term matching nothing in the library — stayed honest
+  ("the excerpts don't reference a PTI bearing") rather than guessing or
+  looping.
 
-**Suggested approach, not yet built:** Likely two changes together —
-(1) a `SYSTEM_PROMPT` change instructing Claude to ask a clarifying question
-grounded in the *actual* distinct terms/options visible in the retrieved
-excerpts (not a generic "could you clarify?"), and (2) passing at least the
-immediately-prior exchange into the prompt (not currently done — each
-question is answered statelessly today, with no memory of prior turns even
-though the UI displays chat history) so Claude can tell "I already asked a
-clarifying question last turn" and honor the one-question-max constraint
-instead of asking again. Worth testing against the exact original
-bearing-type example above as the first real test case once built.
+**One nuance not directly exercised in live testing, worth knowing rather
+than re-litigating:** the exact "asked once, user replies, still ambiguous,
+falls back with a stated assumption instead of asking again" sequence
+wasn't caught live in the two real test runs (the first turn each time
+either resolved directly or found nothing at all, rather than asking a
+question that then got an ambiguous reply). The mechanism is verified
+correct via the dry-run prompt inspection and the strengthened fallback
+instruction; the precise three-step live sequence just didn't happen to
+occur in these particular real questions. Not blocking — flagged here so
+it's a known gap, not a forgotten one, if it's ever worth a dedicated test.
 
 ---
 
