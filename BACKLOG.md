@@ -5,6 +5,30 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## Deliberately deferred — real password/access gate before wider rollout
+
+**What:** The app currently has no password or access control at all — a
+free-text name field only (see `docs/architecture.md`). Anyone with the
+URL can use it.
+
+**Deliberately deferred (Aug 2026, Dave's explicit call):** at least a
+week, tied to actual rollout readiness rather than a fixed date — Dave
+wants more TMs ingested and more real testing done first, before opening
+access to the wider crew (mechanics, port engineer, captain). Since only
+Dave and Jared use it currently, the risk is low enough to sequence this
+against real need rather than build it preemptively.
+
+**Trigger to revisit:** whenever the wider-crew rollout actually becomes
+imminent — build this shortly before then, not automatically "in a week"
+if rollout itself has also slipped.
+
+**Distinct from, and not to be conflated with, the separate exposed
+`service_role` key issue below** — that's a credential-exposure risk
+that exists regardless of app rollout timing, not an access-control
+decision tied to how many people use the app.
+
+---
+
 ## 🔺 PRIORITY (elevated Aug 2026) — Engineer Notes: field/tribal knowledge, tied to equipment
 
 **Name confirmed (Aug 2026, Dave + Jared): "Engineer Notes."**
