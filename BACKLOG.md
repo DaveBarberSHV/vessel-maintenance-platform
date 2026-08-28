@@ -216,20 +216,51 @@ into chat while troubleshooting a connection-string mix-up (Aug 2026).
 This key has full, unrestricted access to the project — more sensitive
 than the Voyage key exposure earlier in the project.
 
-**Status:** rotation not yet completed. Supabase's UI for this changed
-recently — the classic "regenerate" button wasn't found on the API Keys
-page; the "JWT Keys" → "Legacy JWT Secret" page appears to be the right
-place (rotating the underlying JWT secret regenerates both `anon` and
-`service_role` legacy keys), but this wasn't confirmed working yet.
+**Status: real attempt made (Aug 2026), stopped deliberately before
+completion — genuinely tricky, worth a careful real plan before retrying,
+not another live attempt.**
 
-**Why not fixed immediately:** didn't want to block the actual latency
-investigation on a UI hunt; the exposure risk is real but the key hasn't
-shown signs of misuse so far.
+**What we learned, working through Supabase's UI directly (worth
+recording precisely, since this took real trial and error to work out):**
+- Settings → API Keys → "Legacy anon, service_role API keys" tab shows
+  the actual key our code uses (`eyJ...` format, decodable as a normal
+  JWT).
+- The rotation mechanism lives at Settings → API Keys → JWT Keys →
+  "JWT Signing Keys" tab → "Create Standby Key" → choose **HS256 (Shared
+  Secret)** specifically (not ECC/RSA — those are for a different,
+  newer Auth-session system, confirmed not what signs our legacy keys)
+  → "Rotate Signing Key".
+- **First attempt rotated the wrong key.** The signing-keys page showed
+  two distinct "Previous Key" entries after rotating: an ECC key (the one
+  we'd just rotated, unrelated to our actual leaked key) and a separate,
+  pre-existing "Legacy HS256 (Shared Secret)" key — confirmed via JWT
+  header inspection that HS256 is the one actually signing our real
+  `service_role` key. Verified precisely: decoded the `iat`/`exp` fields
+  of the "rotated" key and found them byte-for-byte identical to the
+  original exposed key — real proof the first rotation attempt hadn't
+  actually changed anything.
+- **Attempting to revoke the correct (Legacy HS256) key surfaced a real
+  blocker:** Supabase requires "disabling JWT-based legacy API keys"
+  first, which almost certainly means migrating to the newer key format
+  (`sb_secret_...`) entirely — the same format we already confirmed
+  **does not work with the Storage API** (see the page-images entry's
+  "Invalid Compact JWS" gotcha). Proceeding past this point live, without
+  a tested fallback, risked breaking real working functionality (page
+  image uploads) in exchange for closing the exposure — a bad trade to
+  make under pressure mid-session.
 
-**Next step:** find and complete the rotation, or contact Supabase
-support if the UI path isn't clear. Once rotated, `SUPABASE_SERVICE_KEY`
-in both `.streamlit/secrets.toml` and Streamlit Cloud's deployed secrets
-needs updating to the new value.
+**Deliberately stopped here, not proceeding further today:** the exposed
+key has been out for a couple of weeks with no signs of misuse so far;
+the marginal risk of a few more days is low, and lower than the risk of
+breaking working Storage uploads live with no tested alternative in hand.
+
+**Real next step, properly scoped rather than attempted live:** figure out
+and test whether `page_images.py`'s Storage authentication can work with
+the newer `sb_secret_...` key format (worth a fresh, careful look — this
+was only tried once, weeks ago, and rejected on the first error rather
+than investigated deeply), or find another supported path that doesn't
+require legacy JWT format. Test that path thoroughly *before* revoking
+anything, not after.
 
 ---
 
