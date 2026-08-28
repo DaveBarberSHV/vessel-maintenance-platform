@@ -29,7 +29,7 @@ decision tied to how many people use the app.
 
 ---
 
-## 🔺 PRIORITY (elevated Aug 2026) — Engineer Notes: field/tribal knowledge, tied to equipment
+## ✅ RESOLVED (standalone entry point) — Engineer Notes: field/tribal knowledge, tied to equipment
 
 **Name confirmed (Aug 2026, Dave + Jared): "Engineer Notes."**
 
@@ -41,8 +41,8 @@ chosen (a factor in picking `pgvector` over a simpler option); sharpened
 into something much more concrete and higher-priority by Jared (Aug 2026)
 after seeing how the vessel equipment registry works.
 
-**Jared's real example, which should directly shape the design, not just
-motivate it:**
+**Jared's real example, which directly shaped the design, not just
+motivated it:**
 > "As far as the notes from real world experience. It would be important
 > that the system keeps track of who is inputting the notes and
 > differentiates it from manufacturer info. You can get factual reference
@@ -62,53 +62,51 @@ customer (the vessel owner) than to day-to-day crew — an owner cares
 directly about not losing institutional knowledge across crew turnover,
 which is a genuine cost problem, not just a convenience.
 
-**Design directly informed by Jared's example, not yet built:**
-- **Attribution is a hard requirement, not optional** — who and when need
-  equal visual weight to the note content itself, always. Reuses
-  `user_name`, already flowing through the app for chat history — no new
-  identity infrastructure needed.
-- **Never blend into the "official" answer.** A note must appear as a
-  clearly separate, visually distinct block — e.g. "Engineer note — Jared
-  A., Aug 27: clutches filled +5% higher than manual spec due to
-  additional pipe lengths, per CAT tech" — never silently merged into
-  manufacturer spec text as if it were the same kind of fact.
-- **Likely doesn't need new retrieval infrastructure for a first version.**
-  Notes are naturally per-piece-of-equipment — the same `(category,
-  position)` identity already built for `vessel_equipment`. The registry's
-  proven pattern (always inject current state into every prompt,
-  unconditionally, rather than relying on semantic search to happen to
-  find it) likely applies directly here too, at least for a first version
-  — no need to stand up separate semantic search over notes just to get
-  real value.
+**Built (Aug 2026), following the design directly:**
+- `ingestion/engineer_notes.py` — new `engineer_notes` Postgres table
+  (category, position, author, note_text, created_at). Reuses the
+  vessel equipment registry's `(category, position)` identity for its
+  equipment dropdown, plus a "General / Other" option for anything that
+  doesn't map to one specific item.
+- `answer_query.py` — every question fetches all current notes and
+  includes them in the prompt unconditionally, the same proven pattern
+  as the equipment registry (not dependent on retrieval happening to
+  find a note). `SYSTEM_PROMPT` instructs Claude to treat notes as real
+  crew experience, never as manufacturer data, always clearly attributed,
+  and to surface (not silently resolve) any conflict between a note and
+  the manual.
+- `app.py` — standalone **"📝 + Engineer Note"** entry point in the
+  sidebar: pick equipment from a dropdown (reusing the registry), write
+  the note, submit.
+- **Real bug found and fixed along the way, benefiting the whole app, not
+  just this feature:** a "connection already closed" error surfaced when
+  submitting a note after the shared cached database connection had sat
+  idle for a while (Supabase's pooler can silently drop it in the
+  background). Fixed with a single reusable `with_connection_retry()`
+  wrapper, applied to every database operation in `app.py` — chat
+  history, feedback, and notes alike — not just the one button that
+  happened to surface it.
 
-**Entry-point / UX design (Aug 2026, discussed, not yet built):**
-- **Two entry points, one primary and one secondary — not just a single
-  standalone button.** A disconnected "+ Engineer Note" button as the
-  *only* path risks the common failure pattern for this kind of feature:
-  used once during a demo, then forgotten, since it competes with
-  whatever the person actually came to do — and this app's own users are
-  explicitly busy and impatient with extra steps (see Jared's own stated
-  reasoning elsewhere in this file).
-  - **Primary: inline, attached to an actual answer.** A small "📝 Add a
-    note" action alongside the existing 👍/👎/Copy row. Since the
-    equipment is already known from that answer's citations, the
-    equipment field can be **pre-filled** ("Add a note about: Marine
-    Clutch/Steering") with just a confirm/change option, not a cold
-    dropdown — captures knowledge exactly when someone naturally thinks
-    "actually, we do it differently," right after getting an answer.
-  - **Secondary: a standalone "+ Engineer Note" button** (Dave's original
-    idea, still right for this path) for the proactive case — someone who
-    wants to log something without having asked a question first. Here,
-    force a real equipment selection from the same category/position
-    options already in the registry — not free text, to avoid notes
-    landing under inconsistent naming (e.g. "clutch" in one place,
-    "Clutch" in another).
-- **Needs a "General / Other" option from the start**, not added later —
-  not every note will cleanly map to one of the ~10 current registry
-  entries, especially once HVAC/electrical/etc. get added, or for
-  something genuinely vessel-wide rather than tied to one system.
-- **Deliberately deferred, not a blocker:** editing or removing a note
-  after the fact if it turns out wrong — a real v2 concern, not solved now.
+**Verified live, real example, real conflict correctly surfaced:** asked
+"What's the recommended fill level for the marine clutch?" — the answer
+correctly cited the manufacturer spec (70% ± 5%) from the real manual,
+then clearly and separately presented a real submitted field note (crew
+practice: 80%, attributed with author and date), and **proactively
+flagged that the two are in real conflict** (crew practice exceeds the
+manual's stated upper bound) rather than silently picking one — a
+genuinely stronger result than the original design goal of "just keep
+them visually separate."
+
+**Not yet built — the planned fast follow:**
+- **Inline entry point attached to a specific answer**, pre-filled with
+  that answer's own equipment context (e.g. "Add a note about: Marine
+  Clutch/Steering") rather than a cold dropdown — captures knowledge
+  exactly when someone naturally thinks "actually, we do it differently,"
+  right after getting an answer. The standalone button (built) remains
+  the right path for someone logging something proactively; this is a
+  second, complementary entry point, not a replacement.
+- Editing or removing a note after the fact if it turns out wrong — a
+  real v2 concern, deliberately not solved now.
 
 **Related product/process idea, distinct from the engineering feature
 itself — capture separately, don't lose it:** Dave's plan to build a
@@ -201,6 +199,20 @@ since they were never written to the database at all.
 (`@st.cache_resource` connections) surviving a redeploy that should have
 replaced them, could be a Streamlit Cloud platform quirk. Not investigated
 deeply, since the reliable workaround is simple.
+
+**Possibly explained, and possibly fixed as a side effect (Aug 2026):** a
+directly related bug was found and fixed while building Engineer Notes —
+the same cached connection, left idle for a while, can be silently
+dropped by Supabase's pooler, and the failure only surfaces (silently, if
+wrapped in a bare `except: pass`) the next time it's used — which is
+exactly the symptom described above. Fixed with a reusable
+`with_connection_retry()` wrapper in `app.py`, applied to every database
+operation. This may reduce or eliminate the need for a manual reboot
+after future deploys, since a stale connection should now self-heal
+rather than silently fail — genuinely worth testing next time a real
+deploy happens, rather than assuming the old workaround is still
+necessary. Not certain these are the exact same root cause, but plausible
+enough to record the connection here rather than treat them as unrelated.
 
 **Standing practice going forward:** manually reboot the deployed app
 after every push that touches `app.py`, `db.py`, or dependencies —
