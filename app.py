@@ -37,6 +37,7 @@ for key_name in ("VOYAGE_API_KEY", "ANTHROPIC_API_KEY", "SUPABASE_DB_URL"):
 
 from answer_query import get_answer, format_sources  # noqa: E402
 import db  # noqa: E402
+import engineer_notes  # noqa: E402
 
 st.set_page_config(page_title="Fathom - Polaris", page_icon="⚓")
 
@@ -84,7 +85,29 @@ def get_db_connection():
     ever needs to handle real concurrent load."""
     conn = db.get_connection()
     db.ensure_schema(conn)
+    engineer_notes.ensure_notes_schema(conn)
     return conn
+
+
+def with_connection_retry(fn, *args, **kwargs):
+    """Calls fn(conn, *args, **kwargs) using the shared cached connection;
+    if that fails, retries ONCE with a freshly re-established connection
+    before giving up. Added Aug 2026 after a real failure ("connection
+    already closed") surfaced when adding an Engineer Note: a cached
+    connection left idle for a while (e.g. time spent typing) can be
+    silently dropped by Supabase's session pooler in the background, and
+    the failure only shows up the next time the connection is actually
+    used. This risk applies to every operation using the shared cached
+    connection, not just the one feature that happened to surface it —
+    hence one reusable wrapper used everywhere, not a fix in just one
+    place."""
+    global conn
+    try:
+        return fn(conn, *args, **kwargs)
+    except Exception:
+        get_db_connection.clear()
+        conn = get_db_connection()
+        return fn(conn, *args, **kwargs)
 
 
 try:
@@ -132,16 +155,51 @@ with st.sidebar:
             st.session_state.messages = []
             st.rerun()
 
+        # Engineer Notes (Aug 2026) — standalone entry point. See
+        # BACKLOG.md for the full design (Jared's real motivating example,
+        # why attribution is non-negotiable, why this reuses the
+        # equipment registry's identity rather than free text). A second,
+        # inline entry point attached to a specific answer (pre-filled
+        # from that answer's own equipment context) is a planned fast
+        # follow, not built yet — this is the path for someone who wants
+        # to log something proactively, without having asked a question
+        # first.
+        with st.popover("📝 + Engineer Note", use_container_width=True):
+            st.caption("Real-world experience — kept clearly separate from manufacturer data.")
+            try:
+                options = with_connection_retry(engineer_notes.get_equipment_options)
+            except Exception:
+                options = [(engineer_notes.GENERAL_CATEGORY, None)]
+            labels = [f"{cat} — {pos}" if pos else cat for cat, pos in options]
+            selected_label = st.selectbox("Equipment", labels, key="note_equipment_select")
+            note_text = st.text_area(
+                "Note", placeholder="What did you notice or adjust, and why?",
+                key="note_text_input",
+            )
+            if st.button("Add Note", key="note_submit"):
+                if note_text.strip():
+                    category, position = options[labels.index(selected_label)]
+                    try:
+                        with_connection_retry(
+                            engineer_notes.add_note, category, position,
+                            st.session_state.user_name, note_text.strip())
+                        st.success("Note added — it'll be used in future answers about this equipment.")
+                    except Exception as e:
+                        st.error(f"Couldn't save the note right now ({e}).")
+                else:
+                    st.warning("Please enter a note before submitting.")
+
         st.caption("Past conversations")
         try:
-            past = db.list_conversations(conn, st.session_state.user_name)
+            past = with_connection_retry(db.list_conversations, st.session_state.user_name)
         except Exception:
             past = []
         for convo in past:
             label = convo["first_message"][:40] + ("..." if len(convo["first_message"]) > 40 else "")
             if st.button(label, key=f"convo_{convo['conversation_id']}", use_container_width=True):
                 st.session_state.conversation_id = str(convo["conversation_id"])
-                st.session_state.messages = db.load_conversation(conn, str(convo["conversation_id"]))
+                st.session_state.messages = with_connection_retry(
+                    db.load_conversation, str(convo["conversation_id"]))
                 st.rerun()
 
 if not st.session_state.user_name:
@@ -194,7 +252,7 @@ def render_assistant_extras(message: dict, key_prefix: str):
             if st.button("👍" if current != "up" else "✅👍", key=f"{key_prefix}_up"):
                 new_value = None if current == "up" else "up"
                 try:
-                    db.set_feedback(conn, message_id, new_value)
+                    with_connection_retry(db.set_feedback, message_id, new_value)
                     message["feedback"] = new_value
                     st.rerun()
                 except Exception:
@@ -203,7 +261,7 @@ def render_assistant_extras(message: dict, key_prefix: str):
             if st.button("👎" if current != "down" else "✅👎", key=f"{key_prefix}_down"):
                 new_value = None if current == "down" else "down"
                 try:
-                    db.set_feedback(conn, message_id, new_value)
+                    with_connection_retry(db.set_feedback, message_id, new_value)
                     message["feedback"] = new_value
                     st.rerun()
                 except Exception:
@@ -231,8 +289,9 @@ if question:
         st.markdown(question)
     if db_available:
         try:
-            db.save_message(conn, st.session_state.conversation_id,
-                             st.session_state.user_name, "user", question)
+            with_connection_retry(
+                db.save_message, st.session_state.conversation_id,
+                st.session_state.user_name, "user", question)
         except Exception:
             pass  # chat still works in-session even if a save fails
 
@@ -259,8 +318,8 @@ if question:
         new_message = {"role": "assistant", "content": answer_text, "chunks": chunks}
         if db_available:
             try:
-                new_message["id"] = db.save_message(
-                    conn, st.session_state.conversation_id,
+                new_message["id"] = with_connection_retry(
+                    db.save_message, st.session_state.conversation_id,
                     st.session_state.user_name, "assistant",
                     answer_text, chunks=chunks)
             except Exception:

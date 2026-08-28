@@ -112,6 +112,13 @@ options — the vessel only has one of them installed, so there's no need to \
 ask the user which one unless the registry itself doesn't resolve it (e.g. \
 the equipment isn't in the list at all, or the manual's variants don't map \
 cleanly to what's listed).
+- If an "Engineer Notes" section is provided, treat it as real crew \
+experience, NOT manufacturer data — never state a note as if it were a \
+manufacturer specification. If a note is directly relevant to the \
+question, mention it clearly attributed (e.g. "Note from Jared A., Aug \
+27: ...") in addition to, not instead of, the manufacturer's own \
+information, and make clear which is which. If a note conflicts with the \
+manual, present both plainly rather than silently preferring one.
 
 Clarifying questions — ask at most ONE per issue, never loop:
 - If, after considering the vessel equipment list above, the excerpts still \
@@ -133,13 +140,14 @@ conversation is starting over.
 
 
 def build_prompt(question: str, chunks: list[dict], equipment_context: str = "",
-                  previous_exchange: dict | None = None) -> str:
+                  previous_exchange: dict | None = None, notes_context: str = "") -> str:
     excerpt_blocks = []
     for i, c in enumerate(chunks):
         citation = f'{c["metadata"]["document_title"]}, {c["metadata"]["revision"]}, p. {c["metadata"]["page_number"]}'
         excerpt_blocks.append(f"--- Excerpt {i+1} ({citation}) ---\n{c['text']}")
     excerpts = "\n\n".join(excerpt_blocks)
     equipment_block = f"\n{equipment_context}\n" if equipment_context else ""
+    notes_block = f"\n{notes_context}\n" if notes_context else ""
 
     history_block = ""
     if previous_exchange:
@@ -151,7 +159,7 @@ You answered: "{previous_exchange['answer']}"
 """
 
     return f"""Question: {question}
-{equipment_block}{history_block}
+{equipment_block}{notes_block}{history_block}
 Manual excerpts retrieved for this question:
 
 {excerpts}
@@ -227,7 +235,17 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
     except Exception:
         pass  # equipment context is an enhancement, never a reason a question fails
 
-    prompt = build_prompt(question, chunks, equipment_context, previous_exchange)
+    notes_context = ""
+    try:
+        from retrieval import get_pg_connection
+        from engineer_notes import get_all_notes, format_notes_for_prompt
+        notes_conn = get_pg_connection()
+        notes_context = format_notes_for_prompt(get_all_notes(notes_conn))
+        notes_conn.close()
+    except Exception:
+        pass  # same reasoning as equipment_context — never a reason a question fails
+
+    prompt = build_prompt(question, chunks, equipment_context, previous_exchange, notes_context)
 
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
@@ -307,7 +325,16 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
             eq_conn.close()
         except Exception:
             pass
-        prompt = build_prompt(question, chunks, equipment_context, previous_exchange)
+        notes_context = ""
+        try:
+            from retrieval import get_pg_connection
+            from engineer_notes import get_all_notes, format_notes_for_prompt
+            notes_conn = get_pg_connection()
+            notes_context = format_notes_for_prompt(get_all_notes(notes_conn))
+            notes_conn.close()
+        except Exception:
+            pass
+        prompt = build_prompt(question, chunks, equipment_context, previous_exchange, notes_context)
         print("=== SYSTEM PROMPT ===")
         print(SYSTEM_PROMPT)
         if search_query != question:
