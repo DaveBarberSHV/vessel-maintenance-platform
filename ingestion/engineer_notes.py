@@ -95,14 +95,23 @@ def get_equipment_options(conn) -> list[tuple[str, str | None]]:
     """Returns (category, position) pairs for the notes dropdown — reuses
     the real installed-equipment registry rather than a separate list,
     plus a General/Other option for anything that doesn't map cleanly to
-    one specific item. Returns just the General/Other option (not an
-    empty list) if the registry is empty/unreachable, so the form always
-    has at least one valid choice."""
-    try:
-        from extract_equipment_list import get_equipment_list
-        entries = get_equipment_list(conn)
-        options = [(e["category"], e.get("position")) for e in entries]
-    except Exception:
-        options = []
+    one specific item.
+
+    Queries the database directly rather than calling
+    extract_equipment_list.get_equipment_list() (Aug 2026, real bug fix):
+    that function deliberately swallows its own errors internally so a
+    broken equipment lookup never breaks a question — correct there, but
+    it meant a real failure here (e.g. a stale cached connection) never
+    became an actual exception, so app.py's with_connection_retry()
+    wrapper — which only knows to retry on a caught exception — never
+    got the chance to fetch a fresh connection and try again. The result
+    was a dropdown silently stuck showing only "General / Other" instead
+    of the real registry. This function is deliberately allowed to raise;
+    the caller (app.py) already wraps this in a try/except of its own as
+    the final fallback if a fresh connection genuinely doesn't help
+    either."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("SELECT category, position FROM vessel_equipment ORDER BY category, position")
+        options = [(r["category"], r["position"]) for r in cur.fetchall()]
     options.append((GENERAL_CATEGORY, None))
     return options
