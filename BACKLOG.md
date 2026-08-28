@@ -5,6 +5,100 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## 🔺 PRIORITY (elevated Aug 2026) — Engineer Notes: field/tribal knowledge, tied to equipment
+
+**Name confirmed (Aug 2026, Dave + Jared): "Engineer Notes."**
+
+**What:** Capturing real-world, experience-based knowledge from engineers —
+adjustments, quirks, and lessons learned that aren't in any manufacturer
+document — tied to specific pieces of equipment, clearly separated from
+official TM content. First raised as a passing idea when Supabase was
+chosen (a factor in picking `pgvector` over a simpler option); sharpened
+into something much more concrete and higher-priority by Jared (Aug 2026)
+after seeing how the vessel equipment registry works.
+
+**Jared's real example, which should directly shape the design, not just
+motivate it:**
+> "As far as the notes from real world experience. It would be important
+> that the system keeps track of who is inputting the notes and
+> differentiates it from manufacturer info. You can get factual reference
+> data from the TMs. But then it should mention that USERSOANSO added a
+> note. For example: Aug 27 — Jared A. noted that clutches should be
+> filled +5% higher than manual specs due to additional pipe lengths
+> installed, per CAT tech. We don't fill clutches to the recommended 75%,
+> we go to 80%."
+
+**Why this got elevated, not just captured (Aug 2026, Dave):** the real
+value here is bigger than "notes" — it's addressing a genuinely expensive,
+common industry problem: when a vessel loses a chief engineer, it loses
+all the vessel-specific knowledge that engineer had, and management often
+ends up re-troubleshooting problems that were already solved once. Dave's
+view: this value proposition matters even more to the actual paying
+customer (the vessel owner) than to day-to-day crew — an owner cares
+directly about not losing institutional knowledge across crew turnover,
+which is a genuine cost problem, not just a convenience.
+
+**Design directly informed by Jared's example, not yet built:**
+- **Attribution is a hard requirement, not optional** — who and when need
+  equal visual weight to the note content itself, always. Reuses
+  `user_name`, already flowing through the app for chat history — no new
+  identity infrastructure needed.
+- **Never blend into the "official" answer.** A note must appear as a
+  clearly separate, visually distinct block — e.g. "Engineer note — Jared
+  A., Aug 27: clutches filled +5% higher than manual spec due to
+  additional pipe lengths, per CAT tech" — never silently merged into
+  manufacturer spec text as if it were the same kind of fact.
+- **Likely doesn't need new retrieval infrastructure for a first version.**
+  Notes are naturally per-piece-of-equipment — the same `(category,
+  position)` identity already built for `vessel_equipment`. The registry's
+  proven pattern (always inject current state into every prompt,
+  unconditionally, rather than relying on semantic search to happen to
+  find it) likely applies directly here too, at least for a first version
+  — no need to stand up separate semantic search over notes just to get
+  real value.
+
+**Entry-point / UX design (Aug 2026, discussed, not yet built):**
+- **Two entry points, one primary and one secondary — not just a single
+  standalone button.** A disconnected "+ Engineer Note" button as the
+  *only* path risks the common failure pattern for this kind of feature:
+  used once during a demo, then forgotten, since it competes with
+  whatever the person actually came to do — and this app's own users are
+  explicitly busy and impatient with extra steps (see Jared's own stated
+  reasoning elsewhere in this file).
+  - **Primary: inline, attached to an actual answer.** A small "📝 Add a
+    note" action alongside the existing 👍/👎/Copy row. Since the
+    equipment is already known from that answer's citations, the
+    equipment field can be **pre-filled** ("Add a note about: Marine
+    Clutch/Steering") with just a confirm/change option, not a cold
+    dropdown — captures knowledge exactly when someone naturally thinks
+    "actually, we do it differently," right after getting an answer.
+  - **Secondary: a standalone "+ Engineer Note" button** (Dave's original
+    idea, still right for this path) for the proactive case — someone who
+    wants to log something without having asked a question first. Here,
+    force a real equipment selection from the same category/position
+    options already in the registry — not free text, to avoid notes
+    landing under inconsistent naming (e.g. "clutch" in one place,
+    "Clutch" in another).
+- **Needs a "General / Other" option from the start**, not added later —
+  not every note will cleanly map to one of the ~10 current registry
+  entries, especially once HVAC/electrical/etc. get added, or for
+  something genuinely vessel-wide rather than tied to one system.
+- **Deliberately deferred, not a blocker:** editing or removing a note
+  after the fact if it turns out wrong — a real v2 concern, not solved now.
+
+**Related product/process idea, distinct from the engineering feature
+itself — capture separately, don't lose it:** Dave's plan to build a
+**formal onboarding process** for capturing vessel-specific knowledge
+per system when a vessel/customer first comes onboard — rather than
+relying purely on notes accumulating organically over time from ongoing
+use. This is a business/process idea (how the knowledge gets captured
+in the first place) as much as a technical one (where it's stored and
+how it's surfaced) — worth designing deliberately together when this
+gets built, not something the engineering side should assume or invent
+alone.
+
+---
+
 ## ✅ RESOLVED — Vessel equipment registry: know which model applies without asking
 
 **What:** Real problem, raised by Dave (Aug 2026): Jared sent a one-page
@@ -54,12 +148,11 @@ know.
   the same 10 correct entries as the manual run, alongside normal
   chunking and page-image rendering for the same file in one pass.
 
-**Deliberately not built (discussed, parked, not a decision to revisit
-soon):** a "notes" field/table for engineers to record real-world
-findings/peculiarities per piece of equipment — the same idea flagged
-back when Supabase/`pgvector` was first chosen. The registry's
-`(category, position)` identity gives a clean place for this to attach
-later; not scoped or built now, to keep today's feature focused.
+**Related, now-prioritized idea:** "Engineer Notes" — a field-notes/tribal-
+knowledge feature for engineers to record real-world findings per piece
+of equipment, attaching naturally to this registry's `(category,
+position)` identity — see the dedicated priority entry near the top of
+this file for Jared's real example and the design it now points to.
 
 ---
 
