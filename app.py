@@ -38,7 +38,41 @@ for key_name in ("VOYAGE_API_KEY", "ANTHROPIC_API_KEY", "SUPABASE_DB_URL"):
 from answer_query import get_answer, format_sources  # noqa: E402
 import db  # noqa: E402
 
-st.set_page_config(page_title="Vessel Maintenance TM Assistant", page_icon="⚓")
+st.set_page_config(page_title="Fathom - Polaris", page_icon="⚓")
+
+# Hide Streamlit's default developer-facing chrome (Aug 2026) — the
+# top-right toolbar (Share/star/GitHub/edit-pencil icons), the hamburger
+# menu (with its "Deploy" option), and the "Made with Streamlit" footer.
+# These are aimed at Streamlit developers, not end users, and make an
+# app look like an obvious dev/demo project rather than a real product —
+# worth hiding now given the longer-term goal of this looking
+# professional to an actual customer, not just Dave and Jared. Uses
+# Streamlit's documented data-testid selectors where available (more
+# stable across versions than relying on generic tag names alone).
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+[data-testid="stToolbar"] {visibility: hidden;}
+.stDeployButton {display: none;}
+
+/* Brass/amber accent applied directly (Aug 2026) — Streamlit's built-in
+theme primaryColor doesn't reach plain bordered buttons/borders the way
+it does sliders/checkboxes, so this makes the accent actually visible
+on the elements a user notices most: buttons and the active chat input
+border. */
+button, [data-testid="stSidebar"] button {
+    border-color: #C08A28 !important;
+}
+button:hover, [data-testid="stSidebar"] button:hover {
+    border-color: #E0A83D !important;
+    color: #E0A83D !important;
+}
+[data-testid="stChatInput"] {
+    border-color: #C08A28 !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 
 @st.cache_resource
@@ -61,10 +95,9 @@ except Exception as e:
     db_available = False
     db_error = str(e)
 
-st.title("⚓ Vessel Maintenance TM Assistant")
+st.title("⚓ Fathom - Polaris")
 st.caption(
-    "Ask a question about the drivetrain TMs. Answers are generated only "
-    "from the actual manual text, with sources listed below each answer."
+    "Answers are generated from Polaris's technical data with references listed."
 )
 
 if not db_available:
@@ -190,7 +223,7 @@ for i, message in enumerate(st.session_state.messages):
         if message["role"] == "assistant":
             render_assistant_extras(message, key_prefix=f"hist_{message.get('id', i)}")
 
-question = st.chat_input("Ask a question about the drivetrain TMs...")
+question = st.chat_input("Ask me an engineering question about Polaris's systems...")
 
 if question:
     st.session_state.messages.append({"role": "user", "content": question})

@@ -1,0 +1,13 @@
+[theme]
+# Maritime/engineering-professional palette (Aug 2026) — deep navy with a
+# warm brass accent, evoking ship instrumentation rather than a generic
+# dark-mode default. Explicit rather than relying on each visitor's OS
+# dark/light preference, so the app looks the same, deliberately branded,
+# for everyone — not an accident of whatever theme their system happens
+# to be set to.
+base = "dark"
+backgroundColor = "#0B1220"
+secondaryBackgroundColor = "#16202E"
+primaryColor = "#C08A28"
+textColor = "#E6E8EB"
+font = "sans serif"
