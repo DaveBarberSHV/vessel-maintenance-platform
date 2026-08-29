@@ -5,6 +5,168 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## Anticipated scaling issue — equipment dropdown will get unwieldy beyond drivetrain
+
+**What:** Both the Engineer Notes equipment dropdown and the equipment
+registry itself currently show a flat list of entries (~10 today, all
+implicitly drivetrain since that's all that's been ingested). Raised
+proactively by Dave (Aug 2026), before it's actually a problem: once
+HVAC, electrical, fire suppression, steering, hydraulics, etc. get added
+— the original full vision for this system, per README — that flat list
+could grow to 50-100+ entries, genuinely hard to navigate.
+
+**What already helps, for free, right now:** Streamlit's `st.selectbox`
+supports typing to filter as you type — someone can type "clutch" and
+jump straight there rather than scrolling a long list. Real headroom
+before this becomes a genuine problem, with zero engineering effort.
+
+**The real structural gap:** `vessel_equipment` has no concept of which
+*system* a piece of equipment belongs to — "Main Engine," "Azimuth
+Drive," etc. are a flat list, only implicitly drivetrain by virtue of
+nothing else existing yet. Nothing distinguishes them at the data level
+once other systems are added.
+
+**Path to fixing it, not yet built:**
+- Add an explicit `system` column to `vessel_equipment`, reusing the
+  exact `[System]` value already baked into the TM naming convention
+  (Drivetrain, HVAC, Electrical, ...) — same vocabulary already doing
+  this job for documents, not a new concept.
+- Once that exists, the dropdown can either group entries by system
+  visually (a labeled section per system) or become a two-step picker
+  (choose system, then equipment within it) — either is a real
+  improvement over one long flat list.
+- **Real wrinkle to solve alongside this:** the current equipment-list
+  extraction assumes the whole document is one system (it's literally
+  named `Drivetrain_Vessel_AllModels_EquipmentList...`) — this isn't
+  really something to infer from a document's content; a future HVAC
+  equipment list would need to explicitly declare its system too, the
+  same way the naming convention already does for every other document
+  type, rather than trying to have extraction guess it.
+
+**Trigger to revisit:** when a second system's equipment list is about
+to be ingested (not urgent before then) — no need to build this ahead of
+having a second real system's data to test it against.
+
+---
+
+## Pre-demo cleanup checklist — not urgent, but don't forget before showing this to anyone new
+
+**What:** Two small, known things to fix before a real demo, raised by
+Dave (Aug 2026), while sticking with today's build for now:
+
+1. **Jared's role label is wrong.** `AUTHORIZED_NOTE_AUTHORS` in
+   `engineer_notes.py` currently lists Jared as "Port Engineer" — he's
+   actually the **Chief Engineer**. This was a placeholder from before
+   real user roles were designed (see the dedicated Engineer Notes
+   authorization entry); harmless for now since it's just Dave and
+   Jared testing, but needs fixing once real user roles get built
+   properly, and definitely before showing this to anyone outside the
+   two of them.
+2. **Test data needs a cleanup pass** — several Engineer Notes entries
+   in the database right now are explicitly test content ("Test2",
+   "Test note.", etc.), not real field knowledge. Fine to leave during
+   active development, but should be cleared out before any real demo
+   or wider viewing.
+
+---
+
+## ✅ RESOLVED — Answer layout redesign: Engineer Notes before the answer, Safety Information and combined Sources after
+
+**What:** Real feedback from Jared (Aug 2026), after a live call with him
+and the Chief Engineer, following a real test of Engineer Notes: two
+concrete requests, plus a third idea Dave connected to them.
+1. A relevant Engineer Note should appear **before** the answer, not
+   after — it's information that changes how you approach a task, so it
+   belongs before the procedure, not discovered afterward. Should be
+   collapsible but shown in full by default (matching the existing "View
+   page images" pattern for the *interaction*, expanded by default for
+   *visibility*).
+2. TMs contain real WARNING/CAUTION safety callouts that were previously
+   getting absorbed into general prose or dropped. These deserve their
+   own dedicated, consistent place — but collapsed by default, so safety
+   detail never gets in the way of just getting the answer quickly.
+3. Dave's addition: combine the existing separate "Sources:" citation
+   list and "View page images" expander into one "View Sources"
+   treatment, to save space — but never let a source silently disappear
+   just because it lacks an image (not every citation has one).
+
+**The real technical challenge:** Claude previously produced one blob of
+prose with everything woven together. Splitting "field notes used /
+safety info / the answer" apart cleanly required Claude to output
+something structured, not just free text.
+
+**Built (Aug 2026):**
+- `SYSTEM_PROMPT` now requires Claude's entire response to use three
+  exact, ordered sections: `###FIELD_NOTE_IDS###`, `###SAFETY_INFO###`,
+  `###ANSWER###`.
+- `parse_structured_response()` in `answer_query.py` splits these apart,
+  with a critical resilience property: if the expected markers aren't
+  found or don't parse cleanly, the WHOLE response falls back to being
+  treated as the answer — this must never be the reason an answer fails
+  to display, even on the rare response where Claude doesn't follow the
+  format exactly. Verified directly with several malformed-input cases,
+  not just the happy path.
+- Field notes referenced in an answer are looked up by ID directly from
+  the database (`engineer_notes.get_notes_by_ids()`) for display — never
+  Claude's own paraphrase of them, so the exact verbatim text and
+  attribution shown is always 100% accurate.
+- `db.py` — two new columns (`safety_info`, `field_notes_used`) so a
+  reloaded past conversation replays identically to how it looked live,
+  not just the answer text.
+- `app.py` — the answer now renders in this order: Field Notes (expanded
+  by default) → the answer → Safety Information (collapsed) → View
+  Sources (collapsed, combining citations + images, never dropping a
+  source just because it lacks an image).
+
+**Real bug found and fixed along the way:** a genuinely real note ended
+up duplicated 4 times in the database, submitted seconds apart —
+confirmed with direct evidence (four separate row IDs, identical text,
+timestamps a few seconds apart) that this was a real accidental
+resubmission, not a display or retrieval bug. Fixed by switching the
+"+ Engineer Note" popover to a proper `st.form` with
+`clear_on_submit=True` — a form only submits once, explicitly, on its
+own button, and clears itself afterward, both making an accidental
+resubmission much harder.
+
+**Prompt wording took three real, evidence-based iterations to get
+right — worth recording precisely, since each round was a genuine,
+visible quality regression or improvement, not a guess:**
+1. First version successfully split content apart, but Claude fully
+   restated a note's content in the answer anyway ("Important field
+   note: Crew experience indicates the cardan shafts can only be...") —
+   defeating the point of showing the note separately. Fixed by
+   explicitly forbidding restating a note's content, only "referencing
+   its relevance," with a concrete example.
+2. That fix also surfaced a real, separate leak: Claude's answer
+   included the literal internal `(NOTE_ID:4)` marker in visible text —
+   meaningless and confusing to a reader. Fixed by explicitly forbidding
+   ever mentioning the term "NOTE_ID" in the answer.
+3. **The "don't restate" instruction over-corrected**, producing an
+   answer so vague it lost the actual substance of a real conflict
+   ("be aware of a practical limitation" — without saying what the
+   limitation was) — confirmed by directly comparing the exact wording
+   used across two real live outputs before and after the change, not
+   just a general impression. Fixed by explicitly requiring the
+   *concrete substance* of a conflict in 1-2 sentences (what the note
+   says, in Claude's own brief words) while still forbidding verbatim
+   restatement — threading the needle between "too much" and "too
+   vague." A further refinement added: when a note conflicts with the
+   manual, also name a concrete next step (confirm with whoever wrote
+   the note) — not just that a conflict exists.
+
+**Verified live, the real motivating example, through all three prompt
+iterations:** "How should I grease the cardan shafts?" — final result:
+Engineer Note shown once (not 4 times), correctly icon-distinguished
+from Safety Information (📝 vs. ⚠️ — Dave's own catch, since both had
+been using the same warning-triangle icon, blurring together two
+genuinely different kinds of information), and the answer names the
+actual substance of the conflict (disassembly requirement vs. the
+manual's routine in-service assumption) plus a concrete next step
+(confirm with the note's author) — matching real user judgment on what
+"just right" looks like, not just passing an automated check.
+
+---
+
 ## ✅ RESOLVED — Rebrand CSS broke the sidebar on mobile (Aug 2026)
 
 **What:** Real, live bug: both Dave and Jared found the app unusable on
@@ -129,14 +291,23 @@ manual's stated upper bound) rather than silently picking one — a
 genuinely stronger result than the original design goal of "just keep
 them visually separate."
 
-**Not yet built — the planned fast follow:**
+**Not yet built — deliberately downgraded, not a committed fast follow:**
 - **Inline entry point attached to a specific answer**, pre-filled with
-  that answer's own equipment context (e.g. "Add a note about: Marine
-  Clutch/Steering") rather than a cold dropdown — captures knowledge
-  exactly when someone naturally thinks "actually, we do it differently,"
-  right after getting an answer. The standalone button (built) remains
-  the right path for someone logging something proactively; this is a
-  second, complementary entry point, not a replacement.
+  that answer's own equipment context. Originally planned as a near-term
+  fast follow, to avoid the common "standalone button used once, then
+  forgotten" failure pattern. Reconsidered (Aug 2026, Dave) after the
+  standalone button proved to work well in real use: that failure
+  pattern really applies to *high-frequency* actions where friction
+  compounds — recording real field knowledge is closer to a deliberate,
+  occasional act, where a couple of extra clicks may not matter much.
+  There's also a real complexity cost that was underweighted originally
+  — citation metadata (document titles, equipment models) doesn't map
+  cleanly onto the registry's category/position identity, so "pre-fill"
+  would mean fuzzy text-matching, not a clean lookup. **Only worth
+  building if real usage later shows actual friction** (people wanting
+  to log something right after an answer but not bothering to use the
+  standalone button) — not something to build on the original assumption
+  alone.
 - Editing or removing a note after the fact if it turns out wrong — a
   real v2 concern, deliberately not solved now.
 
@@ -346,14 +517,16 @@ it today risked either re-rendering every page anyway (undoing the
 storage savings from being selective) or building a second, different
 mechanism alongside this one.
 
-**Real gotcha worth recording — Supabase's newer API key format doesn't
-work with Storage:** Supabase's current "Secret keys" (format `sb_secret_...`)
-failed against the Storage API with a cryptic `"Invalid Compact JWS"` /
-403 error. The fix: use the **legacy `service_role` key** instead (format
-`eyJ...`, a classic JWT) — found under the "Legacy anon, service_role API
-keys" tab on the same Settings → API page. `SUPABASE_SERVICE_KEY` in
-secrets/env needs to be this legacy-format key, not the new one, until/
-unless Supabase's Storage API adds support for the newer format.
+**Real gotcha worth recording — Supabase's newer API key format needed a
+different fix than expected:** Supabase's current "Secret keys" (format
+`sb_secret_...`) initially failed against the Storage API with a cryptic
+`"Invalid Compact JWS"` / 403 error. **Fully resolved later (Aug 2026,
+see the dedicated key-rotation entry above)** — the real cause was our
+own request only sending `Authorization: Bearer {key}`; Supabase's
+gateway parses that header as a JWT, which the newer key format isn't.
+Fix: also send the key via a plain `apikey` header. The newer key format
+now works correctly, and the project has since fully rotated off the
+legacy JWT-format key entirely — nothing here still depends on it.
 
 **Verified working end-to-end (Aug 2026):** real page rendered, real
 upload to Supabase Storage, real citation with a working public URL,
