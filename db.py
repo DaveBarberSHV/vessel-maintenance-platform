@@ -17,11 +17,6 @@ messages from one sitting together) and a user_name (Dave or Jared, for
 now — see app.py's simple name-selector "auth"). Assistant messages also
 store their citation chunks as JSON, so history can show the same
 sources UI it showed live.
-
-v2 note (see docs/architecture.md): when maintenance/troubleshooting field
-notes get added later, they'll likely live in their own table, linked to
-equipment/vessel identifiers — not bolted onto this one. Nothing here
-needs to change to support that.
 """
 
 import json
@@ -95,31 +90,41 @@ def ensure_schema(conn):
             CREATE INDEX IF NOT EXISTS idx_messages_user
                 ON messages (user_name, created_at DESC);
         """)
-        # Added for step 5 (👍/👎 feedback) — 'up', 'down', or NULL
-        # (no feedback given yet). ADD COLUMN IF NOT EXISTS so this is
-        # safe to run against a database that already has the table.
         cur.execute("""
             ALTER TABLE messages
                 ADD COLUMN IF NOT EXISTS feedback TEXT
                 CHECK (feedback IN ('up', 'down'));
         """)
+        cur.execute("""
+            ALTER TABLE messages
+                ADD COLUMN IF NOT EXISTS safety_info TEXT;
+        """)
+        cur.execute("""
+            ALTER TABLE messages
+                ADD COLUMN IF NOT EXISTS field_notes_used JSONB;
+        """)
     conn.commit()
 
 
 def save_message(conn, conversation_id: str, user_name: str, role: str,
-                  content: str, chunks: list | None = None) -> int:
+                  content: str, chunks: list | None = None,
+                  safety_info: str | None = None,
+                  field_notes_used: list | None = None) -> int:
     """Returns the new row's id — the caller (app.py) needs this to later
     attach feedback to the specific message a thumbs-up/down was clicked
     on."""
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO messages (conversation_id, user_name, role, content, chunks)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO messages
+                (conversation_id, user_name, role, content, chunks, safety_info, field_notes_used)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (conversation_id, user_name, role, content,
-             json.dumps(chunks) if chunks is not None else None),
+             json.dumps(chunks) if chunks is not None else None,
+             safety_info,
+             json.dumps(field_notes_used) if field_notes_used is not None else None),
         )
         new_id = cur.fetchone()[0]
     conn.commit()
@@ -141,7 +146,8 @@ def load_conversation(conn, conversation_id: str) -> list[dict]:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT id, role, content, chunks, feedback, created_at
+            SELECT id, role, content, chunks, feedback, safety_info,
+                   field_notes_used, created_at
             FROM messages
             WHERE conversation_id = %s
             ORDER BY created_at ASC, id ASC
@@ -156,6 +162,8 @@ def load_conversation(conn, conversation_id: str) -> list[dict]:
             "content": r["content"],
             "chunks": r["chunks"] if r["chunks"] is not None else None,
             "feedback": r["feedback"],
+            "safety_info": r["safety_info"],
+            "field_notes_used": r["field_notes_used"] if r["field_notes_used"] is not None else None,
         }
         for r in rows
     ]

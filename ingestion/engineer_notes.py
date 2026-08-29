@@ -60,12 +60,6 @@ def ensure_notes_schema(conn):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
         """)
-        # Added Aug 2026, alongside AUTHORIZED_NOTE_AUTHORS above. Stored
-        # at write time rather than looked up fresh on every display —
-        # deliberately, so a note's shown role reflects what it actually
-        # was when written, even if the authorized-author list changes
-        # later (e.g. a delegation ends). Nullable: existing notes from
-        # before this feature won't have one.
         cur.execute("""
             ALTER TABLE engineer_notes
                 ADD COLUMN IF NOT EXISTS author_role TEXT;
@@ -95,7 +89,7 @@ def get_all_notes(conn) -> list[dict]:
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT category, position, author, author_role, note_text, created_at
+                SELECT id, category, position, author, author_role, note_text, created_at
                 FROM engineer_notes
                 ORDER BY created_at DESC
             """)
@@ -104,16 +98,56 @@ def get_all_notes(conn) -> list[dict]:
         return []
 
 
+def get_notes_by_ids(conn, note_ids: list[int]) -> list[dict]:
+    """Fetches the exact, verbatim stored text for specific notes by ID
+    (Aug 2026) — used to display the notes Claude actually referenced in
+    forming an answer, pulling straight from the database rather than
+    trusting Claude's own paraphrase in its response text. This is what
+    makes attribution and note content 100% exact every time, not
+    dependent on the model re-stating them accurately.
+
+    created_at is converted to a plain display string here (not left as
+    a datetime object) — this dict gets stored as JSONB in the messages
+    table (see db.py), and Python's json.dumps() can't serialize a raw
+    datetime; formatting it once here avoids that failure and also means
+    callers (app.py) never need datetime-vs-string branching logic
+    depending on whether a note came from a live answer or a reloaded
+    past conversation."""
+    if not note_ids:
+        return []
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT id, category, position, author, author_role, note_text, created_at "
+            "FROM engineer_notes WHERE id = ANY(%s)",
+            (note_ids,),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+    for r in rows:
+        if r.get("created_at"):
+            r["created_at"] = r["created_at"].strftime("%b %d, %Y")
+    return rows
+
+
 def format_notes_for_prompt(notes: list[dict]) -> str:
     """Formats notes for inclusion in the Claude prompt. Deliberately
     labeled and worded to make clear these are real-world engineer input,
     not manufacturer data — this label is what the SYSTEM_PROMPT rule in
     answer_query.py refers back to when instructing Claude how to use
-    and attribute these."""
+    and attribute these.
+
+    Includes each note's ID (Aug 2026) — this is what lets Claude report
+    back exactly which notes it used (via the FIELD_NOTE_IDS section of
+    its structured response — see answer_query.py), rather than us having
+    to guess by re-parsing its free-text answer. The application then
+    looks up those exact IDs directly (get_notes_by_ids above) to display
+    the real, verbatim note content — not Claude's own rendering of it."""
     if not notes:
         return ""
     lines = ["Engineer Notes — real-world field experience added by the crew, "
-             "NOT manufacturer data (always attribute by author and date if used):"]
+             "NOT manufacturer data. Each has a NOTE_ID — if you use one in "
+             "forming your answer, report its ID in the FIELD_NOTE_IDS section "
+             "of your response (see system prompt) rather than just narrating "
+             "it in the answer text itself:"]
     for n in notes:
         parts = [n["category"]]
         if n.get("position"):
@@ -122,7 +156,8 @@ def format_notes_for_prompt(notes: list[dict]) -> str:
         author_display = n["author"]
         if n.get("author_role"):
             author_display += f' ({n["author_role"]})'
-        lines.append(f'- [{" ".join(parts)}] {author_display}, {date_str}: {n["note_text"]}')
+        lines.append(f'- [NOTE_ID:{n["id"]}] [{" ".join(parts)}] {author_display}, '
+                      f'{date_str}: {n["note_text"]}')
     return "\n".join(lines)
 
 

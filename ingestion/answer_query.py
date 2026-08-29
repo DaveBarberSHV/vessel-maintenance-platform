@@ -113,12 +113,45 @@ ask the user which one unless the registry itself doesn't resolve it (e.g. \
 the equipment isn't in the list at all, or the manual's variants don't map \
 cleanly to what's listed).
 - If an "Engineer Notes" section is provided, treat it as real crew \
-experience, NOT manufacturer data — never state a note as if it were a \
-manufacturer specification. If a note is directly relevant to the \
-question, mention it clearly attributed (e.g. "Note from Jared A., Aug \
-27: ...") in addition to, not instead of, the manufacturer's own \
-information, and make clear which is which. If a note conflicts with the \
-manual, present both plainly rather than silently preferring one.
+experience, NOT manufacturer data. Its exact, verbatim text is ALWAYS \
+shown to the reader separately, before your answer — you do not need to, \
+and must NOT, reproduce, restate, quote, or summarize a note's content \
+anywhere in your ANSWER section, even under a heading like "field note" \
+or "important note." If a note is relevant, state the CONCRETE SUBSTANCE \
+of why in one or two sentences — e.g. what the note says that conflicts \
+with the manual, in your own brief words — not just that a note exists \
+("be aware of a practical limitation" is too vague; "the note indicates \
+this can only be done fully disassembled, which conflicts with the \
+manual's routine in-service procedure" is the right level of detail). \
+If a note conflicts with the manual, also state a concrete next step for \
+resolving it — confirm with whoever wrote the note (their name/role is \
+shown in the note itself, right above your answer) before proceeding — \
+not just that a conflict exists. Never reproduce the note's exact \
+wording verbatim, and never mention the term "NOTE_ID" or a note's \
+numeric ID anywhere in your ANSWER section — that ID is an internal \
+reference only used in the FIELD_NOTE_IDS section below; it means \
+nothing to the reader and must never appear in visible text.
+
+Response format — structure your ENTIRE response using exactly these \
+three sections, in this exact order, with these exact headers, even when \
+a section has nothing to report for this question:
+
+###FIELD_NOTE_IDS###
+If you used one or more notes from "Engineer Notes" above in forming \
+your answer, list their NOTE_ID numbers here, comma-separated (e.g. \
+"5, 12"). Otherwise write NONE. Nothing else on this line.
+
+###SAFETY_INFO###
+If the excerpts contain a WARNING, CAUTION, NOTICE, or similar \
+safety-relevant statement that's relevant to this specific question, \
+reproduce it here close to verbatim from the excerpt — don't paraphrase \
+safety-critical wording. If nothing applies, write NONE.
+
+###ANSWER###
+Your actual answer, following all the rules above. Do not repeat the \
+field note content or the safety information here in any form — they're \
+shown separately — beyond a short reference if relevant (e.g. flagging \
+a conflict with the manual, per the Engineer Notes rule above).
 
 Clarifying questions — ask at most ONE per issue, never loop:
 - If, after considering the vessel equipment list above, the excerpts still \
@@ -137,6 +170,39 @@ genuinely useful in the new excerpts, clearly state what you're assuming \
 or what's still missing, and answer with that — never respond as if the \
 conversation is starting over.
 """
+
+
+def parse_structured_response(raw_text: str) -> dict:
+    """Splits Claude's structured response (see SYSTEM_PROMPT's Response
+    Format section) into its three parts. Falls back gracefully to
+    treating the WHOLE response as the answer — no field notes, no
+    safety info — if the expected markers aren't found or don't parse
+    cleanly. This must never be the reason an answer fails to display,
+    even on the rare response where Claude doesn't follow the format
+    exactly."""
+    result = {"field_note_ids": [], "safety_info": "", "answer": raw_text}
+    markers = ("###FIELD_NOTE_IDS###", "###SAFETY_INFO###", "###ANSWER###")
+    if not all(m in raw_text for m in markers):
+        return result
+    try:
+        _, rest = raw_text.split(markers[0], 1)
+        ids_part, rest = rest.split(markers[1], 1)
+        safety_part, answer_part = rest.split(markers[2], 1)
+
+        ids_part = ids_part.strip()
+        if ids_part and ids_part.upper() != "NONE":
+            result["field_note_ids"] = [
+                int(x.strip()) for x in ids_part.split(",") if x.strip().isdigit()
+            ]
+
+        safety_part = safety_part.strip()
+        if safety_part and safety_part.upper() != "NONE":
+            result["safety_info"] = safety_part
+
+        result["answer"] = answer_part.strip()
+    except Exception:
+        return {"field_note_ids": [], "safety_info": "", "answer": raw_text}
+    return result
 
 
 def build_prompt(question: str, chunks: list[dict], equipment_context: str = "",
@@ -199,7 +265,9 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
 
     Returns:
         {
-            "answer": str,        # Claude's synthesized response text
+            "answer": str,        # Claude's synthesized response text —
+                                   # just the ANSWER section, with field
+                                   # notes / safety info split out
             "chunks": list[dict], # raw retrieved chunks (metadata + excerpt
                                    # text) used to build the prompt — the
                                    # front end shows these inline next to
@@ -207,6 +275,12 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
                                    # docs/architecture.md
             "prompt": str,        # the actual prompt sent (useful for a
                                    # debug/dry-run view later)
+            "safety_info": str,   # extracted WARNING/CAUTION text relevant
+                                   # to this answer, or "" if none (Aug 2026)
+            "field_notes_used": list[dict],  # full, verbatim Engineer Notes
+                                   # actually referenced, fetched directly
+                                   # from the database — not Claude's own
+                                   # paraphrase (Aug 2026)
         }
 
     Raises:
@@ -263,10 +337,26 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
     )
+    raw_text = response.content[0].text
+    parsed = parse_structured_response(raw_text)
+
+    field_notes_used = []
+    if parsed["field_note_ids"]:
+        try:
+            from retrieval import get_pg_connection
+            from engineer_notes import get_notes_by_ids
+            fn_conn = get_pg_connection()
+            field_notes_used = get_notes_by_ids(fn_conn, parsed["field_note_ids"])
+            fn_conn.close()
+        except Exception:
+            pass  # if the exact notes can't be fetched, just don't show them — never break the answer
+
     return {
-        "answer": response.content[0].text,
+        "answer": parsed["answer"],
         "chunks": chunks,
         "prompt": prompt,
+        "safety_info": parsed["safety_info"],
+        "field_notes_used": field_notes_used,
     }
 
 
@@ -353,6 +443,14 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
         sys.exit(str(e))
 
     print(result["answer"])
+    if result.get("safety_info"):
+        print(f"\n⚠️ Safety Information:\n{result['safety_info']}")
+    if result.get("field_notes_used"):
+        print("\nField Notes used:")
+        for n in result["field_notes_used"]:
+            author = n["author"] + (f' ({n["author_role"]})' if n.get("author_role") else "")
+            print(f'- [{n["category"]}{" " + n["position"] if n.get("position") else ""}] '
+                  f'{author}, {n.get("created_at", "")}: {n["note_text"]}')
     sources = format_sources(result["chunks"])
     if sources:
         print(f"\n{sources}")

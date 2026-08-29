@@ -14,8 +14,8 @@ Run locally:
     pip install -r requirements.txt
     streamlit run app.py
 
-"Auth" is intentionally minimal for now: a name selector (Dave/Jared) in
-the sidebar, not real accounts — appropriate for two known users; see
+"Auth" is intentionally minimal for now: a free-text name field in the
+sidebar, not real accounts — appropriate for a couple of known users; see
 docs/architecture.md for when this would need to become more.
 """
 
@@ -42,14 +42,11 @@ import engineer_notes  # noqa: E402
 st.set_page_config(page_title="Fathom - Polaris", page_icon="⚓")
 
 # Hide Streamlit's default developer-facing chrome (Aug 2026) — the
-# top-right toolbar (Share/star/GitHub/edit-pencil icons), the hamburger
-# menu (with its "Deploy" option), and the "Made with Streamlit" footer.
-# These are aimed at Streamlit developers, not end users, and make an
-# app look like an obvious dev/demo project rather than a real product —
-# worth hiding now given the longer-term goal of this looking
-# professional to an actual customer, not just Dave and Jared. Uses
-# Streamlit's documented data-testid selectors where available (more
-# stable across versions than relying on generic tag names alone).
+# hamburger menu (with its "Deploy" option) and the "Made with Streamlit"
+# footer. These are aimed at Streamlit developers, not end users, and
+# make an app look like an obvious dev/demo project rather than a real
+# product — worth hiding now given the longer-term goal of this looking
+# professional to an actual customer, not just Dave and Jared.
 st.markdown("""
 <style>
 #MainMenu {visibility: hidden;}
@@ -172,10 +169,9 @@ with st.sidebar:
         # why attribution is non-negotiable, why this reuses the
         # equipment registry's identity rather than free text). A second,
         # inline entry point attached to a specific answer (pre-filled
-        # from that answer's own equipment context) is a planned fast
-        # follow, not built yet — this is the path for someone who wants
-        # to log something proactively, without having asked a question
-        # first.
+        # from that answer's own equipment context) is deliberately not
+        # built — deferred unless real usage shows genuine friction with
+        # the standalone button, see BACKLOG.md.
         #
         # Restricted to a known list of authors (Aug 2026, real
         # requirement from Jared): these notes carry real weight — shown
@@ -193,24 +189,34 @@ with st.sidebar:
                 except Exception:
                     options = [(engineer_notes.GENERAL_CATEGORY, None)]
                 labels = [f"{cat} — {pos}" if pos else cat for cat, pos in options]
-                selected_label = st.selectbox("Equipment", labels, key="note_equipment_select")
-                note_text = st.text_area(
-                    "Note", placeholder="What did you notice or adjust, and why?",
-                    key="note_text_input",
-                )
-                if st.button("Add Note", key="note_submit"):
-                    if note_text.strip():
-                        category, position = options[labels.index(selected_label)]
-                        try:
-                            with_connection_retry(
-                                engineer_notes.add_note, category, position,
-                                st.session_state.user_name, note_text.strip(),
-                                author_role=author_role)
-                            st.success("Note added — it'll be used in future answers about this equipment.")
-                        except Exception as e:
-                            st.error(f"Couldn't save the note right now ({e}).")
-                    else:
-                        st.warning("Please enter a note before submitting.")
+                # st.form (Aug 2026, real bug fix): a real incident produced
+                # 4 duplicate copies of the same note, submitted seconds
+                # apart — almost certainly "Add Note" clicked more than
+                # once while the form still showed the same filled-in
+                # text. A form only submits once, explicitly, on its own
+                # submit button (not on every stray widget interaction),
+                # and clear_on_submit=True resets the fields afterward —
+                # both make an accidental resubmission much harder.
+                with st.form("engineer_note_form", clear_on_submit=True):
+                    selected_label = st.selectbox("Equipment", labels, key="note_equipment_select")
+                    note_text = st.text_area(
+                        "Note", placeholder="What did you notice or adjust, and why?",
+                        key="note_text_input",
+                    )
+                    submitted = st.form_submit_button("Add Note")
+                    if submitted:
+                        if note_text.strip():
+                            category, position = options[labels.index(selected_label)]
+                            try:
+                                with_connection_retry(
+                                    engineer_notes.add_note, category, position,
+                                    st.session_state.user_name, note_text.strip(),
+                                    author_role=author_role)
+                                st.success("Note added — it'll be used in future answers about this equipment.")
+                            except Exception as e:
+                                st.error(f"Couldn't save the note right now ({e}).")
+                        else:
+                            st.warning("Please enter a note before submitting.")
 
         st.caption("Past conversations")
         try:
@@ -235,38 +241,105 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
-def render_assistant_extras(message: dict, key_prefix: str):
-    """Sources caption, page images, 👍/👎 feedback, and copy options —
-    shared by both historical messages (loaded from the sidebar) and the
-    live answer just generated, so they always look and behave
-    identically. key_prefix must be unique per message (message id if
-    saved, or the live index) since Streamlit widgets need stable,
-    unique keys."""
-    chunks = message.get("chunks")
-    if chunks:
-        st.caption(format_sources(chunks).replace("\n", "  \n"))
+def render_field_notes(message: dict):
+    """Engineer Notes referenced in forming this answer, rendered BEFORE
+    the answer itself (Aug 2026, real request from Jared after a call
+    with him and the Port Engineer): these notes carry real operational
+    authority, so they need to be seen before the procedure, not
+    discovered afterward. Expanded by default ("should appear in full"
+    per Jared) but still collapsible if someone wants to hide it —
+    deliberately different from Safety Information below, which stays
+    collapsed by default so it doesn't slow someone down just getting
+    their answer.
 
-    # Page images (Aug 2026) — lets the user see the actual source page,
-    # including diagrams/exploded views that plain text can't fully
-    # convey. Only appears for pages that were selected for rendering at
-    # ingestion time — see page_images.py. De-duplicated the same way
-    # format_sources() dedupes citations (a dense-table sub-chunk shares
-    # its page's image with the main page chunk).
-    image_entries = []
-    seen_images = set()
-    for c in (chunks or []):
+    Label uses 📝, matching the "+ Engineer Note" button (Aug 2026, real
+    fix) — deliberately NOT ⚠️, which is reserved for Safety Information;
+    reusing the warning triangle here blurred together two genuinely
+    different kinds of information (real crew experience vs. a
+    manufacturer safety callout)."""
+    notes = message.get("field_notes_used")
+    if not notes:
+        return
+    label = f"📝 Engineer Note{'s' if len(notes) > 1 else ''} ({len(notes)}) — tap to hide"
+    with st.expander(label, expanded=True):
+        for i, n in enumerate(notes):
+            parts = [n["category"]]
+            if n.get("position"):
+                parts.append(n["position"])
+            author_display = n["author"]
+            if n.get("author_role"):
+                author_display += f' ({n["author_role"]})'
+            st.markdown(f'**{" ".join(parts)}** — {author_display}, {n.get("created_at", "")}')
+            st.markdown(n["note_text"])
+            if i < len(notes) - 1:
+                st.divider()
+
+
+def render_safety_info(message: dict):
+    """Safety Information extracted from the source manual (Aug 2026,
+    real request from Jared): TMs put WARNING/CAUTION callouts before a
+    procedure; we don't want to slow someone down getting their answer,
+    so this stays collapsed by default, right after the answer — opt-in,
+    not always visible, unlike Field Notes above."""
+    safety_info = message.get("safety_info")
+    if not safety_info:
+        return
+    with st.expander("⚠️ Show Safety Information"):
+        st.markdown(safety_info)
+
+
+def render_sources(chunks: list[dict] | None):
+    """Combined citation list + page images (Aug 2026) — previously two
+    separate things (a plain-text "Sources:" caption, and a separate
+    "View page images" expander); merged into one "View Sources"
+    treatment per Jared's request, to save space in the main answer.
+
+    Always lists EVERY citation by name/revision/page, with an image
+    shown inline underneath whenever one exists — deliberately never
+    conditional on having an image, since not every citation has one
+    (scanned documents with no text layer, or ingestion that ran without
+    Storage credentials configured). The plain citation list has been a
+    trust-building feature since day one of this project; this redesign
+    must not cause any source to silently disappear just because it
+    lacks an image."""
+    if not chunks:
+        return
+    seen = set()
+    entries = []
+    for c in chunks:
         m = c["metadata"]
-        url = m.get("page_image_url")
-        if url and url not in seen_images:
-            seen_images.add(url)
-            image_entries.append((m["document_title"], m["page_number"], url))
-    if image_entries:
-        label = f"🖼️ View page image{'s' if len(image_entries) > 1 else ''} ({len(image_entries)})"
-        with st.expander(label):
-            for doc_title, page_num, url in image_entries:
-                st.caption(f"{doc_title}, p. {page_num}")
+        key = (m["document_title"], m["revision"], m["page_number"])
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(m)
+    with st.expander(f"📚 View Sources ({len(entries)})"):
+        for i, m in enumerate(entries):
+            total = m.get("total_pages")
+            page_label = f'p. {m["page_number"]} of {total}' if total else f'p. {m["page_number"]}'
+            st.markdown(f'**{m["document_title"]}, {m["revision"]}, {page_label}**')
+            url = m.get("page_image_url")
+            if url:
                 st.image(url)
+            if i < len(entries) - 1:
+                st.divider()
 
+
+def render_assistant_message(message: dict, key_prefix: str):
+    """Renders a complete assistant message in the agreed order (Aug
+    2026): Field Notes (before the answer, if any), the answer itself,
+    Safety Information (collapsed, after), View Sources (collapsed,
+    combining citations + images), then feedback and copy. Shared by
+    both historical messages (loaded from the sidebar) and the live
+    answer just generated, so they always look and behave identically.
+    key_prefix must be unique per message (message id if saved, or the
+    live index) since Streamlit widgets need stable, unique keys."""
+    render_field_notes(message)
+    st.markdown(message["content"])
+    render_safety_info(message)
+    render_sources(message.get("chunks"))
+
+    chunks = message.get("chunks")
     message_id = message.get("id")
     if db_available and message_id is not None:
         current = message.get("feedback")
@@ -300,9 +373,10 @@ def render_assistant_extras(message: dict, key_prefix: str):
 
 for i, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
         if message["role"] == "assistant":
-            render_assistant_extras(message, key_prefix=f"hist_{message.get('id', i)}")
+            render_assistant_message(message, key_prefix=f"hist_{message.get('id', i)}")
+        else:
+            st.markdown(message["content"])
 
 question = st.chat_input("Ask me an engineering question about Polaris's systems...")
 
@@ -324,6 +398,8 @@ if question:
                 result = get_answer(question)
                 answer_text = result["answer"]
                 chunks = result["chunks"]
+                safety_info = result.get("safety_info", "")
+                field_notes_used = result.get("field_notes_used", [])
             except ValueError as e:
                 # get_voyage_key()/get_answer() raise cleanly on a missing
                 # key rather than crashing the app — see BACKLOG.md and the
@@ -332,21 +408,27 @@ if question:
                 # whole running app for every user, not just this request).
                 answer_text = f"⚠️ Configuration problem: {e}"
                 chunks = []
+                safety_info = ""
+                field_notes_used = []
             except Exception as e:
                 answer_text = f"⚠️ Something went wrong answering that: {e}"
                 chunks = []
+                safety_info = ""
+                field_notes_used = []
 
-        st.markdown(answer_text)
-
-        new_message = {"role": "assistant", "content": answer_text, "chunks": chunks}
+        new_message = {
+            "role": "assistant", "content": answer_text, "chunks": chunks,
+            "safety_info": safety_info, "field_notes_used": field_notes_used,
+        }
         if db_available:
             try:
                 new_message["id"] = with_connection_retry(
                     db.save_message, st.session_state.conversation_id,
                     st.session_state.user_name, "assistant",
-                    answer_text, chunks=chunks)
+                    answer_text, chunks=chunks, safety_info=safety_info,
+                    field_notes_used=field_notes_used)
             except Exception:
                 pass
 
         st.session_state.messages.append(new_message)
-        render_assistant_extras(new_message, key_prefix=f"live_{new_message.get('id', len(st.session_state.messages))}")
+        render_assistant_message(new_message, key_prefix=f"live_{new_message.get('id', len(st.session_state.messages))}")
