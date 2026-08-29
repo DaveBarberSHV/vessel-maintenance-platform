@@ -5,6 +5,38 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## ✅ RESOLVED — Rebrand CSS broke the sidebar on mobile (Aug 2026)
+
+**What:** Real, live bug: both Dave and Jared found the app unusable on
+their phones — stuck on "Select your name in the sidebar to get
+started," with no visible way to actually open the sidebar. Never
+noticed on desktop, since that's where all the rebrand/theme testing
+happened.
+
+**Root cause:** the CSS added to hide Streamlit's developer-facing
+toolbar (`[data-testid="stToolbar"] {visibility: hidden;}` — Share/star/
+GitHub/edit-pencil icons) also hid the sidebar's collapse/expand toggle,
+which lives in that same element. Desktop starts with the sidebar open
+by default, so hiding that control was invisible there. Mobile starts
+the sidebar *collapsed* and depends entirely on that same toggle to open
+it — so this specific bug could only ever show up on a phone, never on
+the desktop screens it was actually tested on.
+
+**Fixed:** removed that one CSS rule. Trades back a couple of small
+dev-facing icons reappearing for the app actually being usable on
+mobile, which matters far more. A more surgical fix (hide just the
+unwanted icons, leave the sidebar toggle alone) is possible, but needs
+real live browser inspection to get the selectors right rather than
+guessing again — not worth the risk of a second version of this same
+bug for a cosmetic win.
+
+**Real lesson for next time, not just this one bug:** any future CSS/
+visual change needs to be checked on an actual phone before considering
+it done, not just desktop — this is exactly the kind of thing that looks
+completely fine on one and silently breaks the other.
+
+---
+
 ## Deliberately deferred — real password/access gate before wider rollout
 
 **What:** The app currently has no password or access control at all — a
