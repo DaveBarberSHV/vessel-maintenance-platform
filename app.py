@@ -54,8 +54,20 @@ st.markdown("""
 <style>
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
-[data-testid="stToolbar"] {visibility: hidden;}
 .stDeployButton {display: none;}
+
+/* Removed (Aug 2026, real bug): [data-testid="stToolbar"] { visibility:
+hidden; } — this broke the app on mobile. On a phone's narrow viewport,
+Streamlit starts the sidebar COLLAPSED and relies entirely on a toggle
+control inside this same toolbar to open it; hiding the whole toolbar
+hid that control too. Never visible as a problem on desktop, since the
+sidebar just starts open there — only surfaced once real people tried
+this on their phones. Trades back a couple of small dev-facing icons
+(GitHub/star/edit) for the app actually being usable on mobile, which
+matters far more. A more surgical fix (hide just those icons, leave the
+sidebar toggle alone) is a real possibility, but needs live browser
+inspection to get right rather than another guess at selectors — not
+worth risking a second version of this same bug. */
 
 /* Brass/amber accent applied directly (Aug 2026) — Streamlit's built-in
 theme primaryColor doesn't reach plain bordered buttons/borders the way
