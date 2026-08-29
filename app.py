@@ -176,30 +176,41 @@ with st.sidebar:
         # follow, not built yet — this is the path for someone who wants
         # to log something proactively, without having asked a question
         # first.
-        with st.popover("📝 + Engineer Note", use_container_width=True):
-            st.caption("Real-world experience — kept clearly separate from manufacturer data.")
-            try:
-                options = with_connection_retry(engineer_notes.get_equipment_options)
-            except Exception:
-                options = [(engineer_notes.GENERAL_CATEGORY, None)]
-            labels = [f"{cat} — {pos}" if pos else cat for cat, pos in options]
-            selected_label = st.selectbox("Equipment", labels, key="note_equipment_select")
-            note_text = st.text_area(
-                "Note", placeholder="What did you notice or adjust, and why?",
-                key="note_text_input",
-            )
-            if st.button("Add Note", key="note_submit"):
-                if note_text.strip():
-                    category, position = options[labels.index(selected_label)]
-                    try:
-                        with_connection_retry(
-                            engineer_notes.add_note, category, position,
-                            st.session_state.user_name, note_text.strip())
-                        st.success("Note added — it'll be used in future answers about this equipment.")
-                    except Exception as e:
-                        st.error(f"Couldn't save the note right now ({e}).")
-                else:
-                    st.warning("Please enter a note before submitting.")
+        #
+        # Restricted to a known list of authors (Aug 2026, real
+        # requirement from Jared): these notes carry real weight — shown
+        # before the answer, treated with real authority — so the button
+        # itself is only shown to people on that list at all, rather than
+        # shown to everyone and blocked with an error. See
+        # engineer_notes.AUTHORIZED_NOTE_AUTHORS to add someone (e.g. a
+        # newly delegated Chief Engineer).
+        author_role = engineer_notes.AUTHORIZED_NOTE_AUTHORS.get(st.session_state.user_name)
+        if author_role:
+            with st.popover("📝 + Engineer Note", use_container_width=True):
+                st.caption("Real-world experience — kept clearly separate from manufacturer data.")
+                try:
+                    options = with_connection_retry(engineer_notes.get_equipment_options)
+                except Exception:
+                    options = [(engineer_notes.GENERAL_CATEGORY, None)]
+                labels = [f"{cat} — {pos}" if pos else cat for cat, pos in options]
+                selected_label = st.selectbox("Equipment", labels, key="note_equipment_select")
+                note_text = st.text_area(
+                    "Note", placeholder="What did you notice or adjust, and why?",
+                    key="note_text_input",
+                )
+                if st.button("Add Note", key="note_submit"):
+                    if note_text.strip():
+                        category, position = options[labels.index(selected_label)]
+                        try:
+                            with_connection_retry(
+                                engineer_notes.add_note, category, position,
+                                st.session_state.user_name, note_text.strip(),
+                                author_role=author_role)
+                            st.success("Note added — it'll be used in future answers about this equipment.")
+                        except Exception as e:
+                            st.error(f"Couldn't save the note right now ({e}).")
+                    else:
+                        st.warning("Please enter a note before submitting.")
 
         st.caption("Past conversations")
         try:

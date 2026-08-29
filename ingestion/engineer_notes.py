@@ -26,6 +26,27 @@ import psycopg2.extras
 
 GENERAL_CATEGORY = "General / Other"
 
+# Who's allowed to submit an Engineer Note, and their role at the time
+# they do (Aug 2026, real requirement from Jared): these notes carry
+# real weight — shown before the answer, treated with real authority —
+# so submission is deliberately restricted to a small, known list rather
+# than open to anyone using the app. The Port Engineer is the real
+# authority on these notes and approves/writes most of them; they may
+# delegate to a Chief Engineer. To add someone (e.g. a newly delegated
+# Chief Engineer), just add a line here and redeploy — no admin UI built
+# for this yet, deliberately, since the list is small and changes rarely
+# at this stage (see BACKLOG.md for the deferred, bigger version of this
+# — a real submission+approval workflow — once usage grows beyond Dave
+# and Jared).
+#
+# Keys must exactly match the normalized (title-cased) value of the
+# "Who's asking?" name field for that person, or the check in app.py
+# won't recognize them.
+AUTHORIZED_NOTE_AUTHORS = {
+    "Jared": "Port Engineer",
+    "Dave": "Developer/PM",
+}
+
 
 def ensure_notes_schema(conn):
     with conn.cursor() as cur:
@@ -39,17 +60,28 @@ def ensure_notes_schema(conn):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
         """)
+        # Added Aug 2026, alongside AUTHORIZED_NOTE_AUTHORS above. Stored
+        # at write time rather than looked up fresh on every display —
+        # deliberately, so a note's shown role reflects what it actually
+        # was when written, even if the authorized-author list changes
+        # later (e.g. a delegation ends). Nullable: existing notes from
+        # before this feature won't have one.
+        cur.execute("""
+            ALTER TABLE engineer_notes
+                ADD COLUMN IF NOT EXISTS author_role TEXT;
+        """)
     conn.commit()
 
 
-def add_note(conn, category: str, position: str | None, author: str, note_text: str):
+def add_note(conn, category: str, position: str | None, author: str,
+             note_text: str, author_role: str | None = None):
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO engineer_notes (category, position, author, note_text)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO engineer_notes (category, position, author, note_text, author_role)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (category, position, author, note_text),
+            (category, position, author, note_text, author_role),
         )
     conn.commit()
 
@@ -63,7 +95,7 @@ def get_all_notes(conn) -> list[dict]:
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT category, position, author, note_text, created_at
+                SELECT category, position, author, author_role, note_text, created_at
                 FROM engineer_notes
                 ORDER BY created_at DESC
             """)
@@ -87,7 +119,10 @@ def format_notes_for_prompt(notes: list[dict]) -> str:
         if n.get("position"):
             parts.append(n["position"])
         date_str = n["created_at"].strftime("%b %d, %Y") if n.get("created_at") else ""
-        lines.append(f'- [{" ".join(parts)}] {n["author"]}, {date_str}: {n["note_text"]}')
+        author_display = n["author"]
+        if n.get("author_role"):
+            author_display += f' ({n["author_role"]})'
+        lines.append(f'- [{" ".join(parts)}] {author_display}, {date_str}: {n["note_text"]}')
     return "\n".join(lines)
 
 
