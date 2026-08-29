@@ -63,11 +63,26 @@ def ensure_storage_bucket():
     "Already exists" detection checks the response body, not just the
     HTTP status — a real case (Aug 2026) showed Supabase returning this
     as HTTP 400 with a "BucketAlreadyExists" code in the JSON body,
-    rather than a straightforward 409 status."""
+    rather than a straightforward 409 status.
+
+    Sends both "apikey" and "Authorization: Bearer" (Aug 2026) — the
+    original legacy-JWT-only version worked with the classic
+    service_role key, but failed with "Invalid Compact JWS" when trying
+    the newer sb_secret_... format (see BACKLOG.md's key rotation entry).
+    Theory: the gateway parses "Authorization: Bearer" specifically as a
+    JWT, which the new opaque-string key format isn't, while "apikey" is
+    just a project/key lookup that never assumed JWT format at all — the
+    standard pattern across Supabase's own client libraries. Sending both
+    together should work correctly regardless of which key format is in
+    use."""
     url, key = get_supabase_storage_config()
     resp = requests.post(
         f"{url}/storage/v1/bucket",
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
         json={"id": STORAGE_BUCKET, "name": STORAGE_BUCKET, "public": True},
     )
     if resp.status_code in (200, 201):
@@ -113,12 +128,14 @@ def public_url(source_file: str, page_number: int) -> str:
 def upload_page_image(image_bytes: bytes, source_file: str, page_number: int) -> str:
     """Uploads one page image, returns its public URL. Idempotent (safe
     to re-run for the same page — overwrites rather than erroring) via
-    the x-upsert header."""
+    the x-upsert header. Sends both "apikey" and "Authorization: Bearer"
+    — see ensure_storage_bucket()'s docstring for why."""
     url, key = get_supabase_storage_config()
     path = storage_path(source_file, page_number)
     resp = requests.post(
         f"{url}/storage/v1/object/{STORAGE_BUCKET}/{path}",
         headers={
+            "apikey": key,
             "Authorization": f"Bearer {key}",
             "Content-Type": "image/png",
             "x-upsert": "true",
