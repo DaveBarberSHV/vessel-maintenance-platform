@@ -253,58 +253,58 @@ follow-up question rather than just glancing at whether the app loads.
 
 ---
 
-## 🔺 OPEN — Exposed service_role key needs rotation (Aug 2026)
+## ✅ RESOLVED — Exposed service_role key rotated and revoked (Aug 2026)
 
 **What:** The Supabase `service_role` secret key was accidentally pasted
-into chat while troubleshooting a connection-string mix-up (Aug 2026).
-This key has full, unrestricted access to the project — more sensitive
-than the Voyage key exposure earlier in the project.
+into chat while troubleshooting a connection-string mix-up. This key has
+full, unrestricted access to the project — more sensitive than the
+Voyage key exposure earlier in the project.
 
-**Status: real attempt made (Aug 2026), stopped deliberately before
-completion — genuinely tricky, worth a careful real plan before retrying,
-not another live attempt.**
+**The real story, worth keeping — this took genuine trial and error
+across multiple sessions to work out, and the path here is exactly what
+to follow if this ever needs doing again:**
 
-**What we learned, working through Supabase's UI directly (worth
-recording precisely, since this took real trial and error to work out):**
-- Settings → API Keys → "Legacy anon, service_role API keys" tab shows
-  the actual key our code uses (`eyJ...` format, decodable as a normal
-  JWT).
-- The rotation mechanism lives at Settings → API Keys → JWT Keys →
-  "JWT Signing Keys" tab → "Create Standby Key" → choose **HS256 (Shared
-  Secret)** specifically (not ECC/RSA — those are for a different,
-  newer Auth-session system, confirmed not what signs our legacy keys)
-  → "Rotate Signing Key".
-- **First attempt rotated the wrong key.** The signing-keys page showed
-  two distinct "Previous Key" entries after rotating: an ECC key (the one
-  we'd just rotated, unrelated to our actual leaked key) and a separate,
-  pre-existing "Legacy HS256 (Shared Secret)" key — confirmed via JWT
-  header inspection that HS256 is the one actually signing our real
-  `service_role` key. Verified precisely: decoded the `iat`/`exp` fields
-  of the "rotated" key and found them byte-for-byte identical to the
-  original exposed key — real proof the first rotation attempt hadn't
-  actually changed anything.
-- **Attempting to revoke the correct (Legacy HS256) key surfaced a real
-  blocker:** Supabase requires "disabling JWT-based legacy API keys"
-  first, which almost certainly means migrating to the newer key format
-  (`sb_secret_...`) entirely — the same format we already confirmed
-  **does not work with the Storage API** (see the page-images entry's
-  "Invalid Compact JWS" gotcha). Proceeding past this point live, without
-  a tested fallback, risked breaking real working functionality (page
-  image uploads) in exchange for closing the exposure — a bad trade to
-  make under pressure mid-session.
+1. **First real attempt** found the rotation mechanism (Settings → API
+   Keys → JWT Keys → "JWT Signing Keys" → "Create Standby Key" → HS256
+   Shared Secret → "Rotate Signing Key"), but rotated the *wrong* key —
+   Supabase had two separate signing keys (an ECC one, unrelated; the
+   real one signing our `service_role` key was a separate "Legacy HS256"
+   entry). Confirmed via direct JWT decoding that the first rotation
+   changed nothing.
+2. **Attempting to revoke the correct key surfaced a real blocker:**
+   Supabase requires disabling JWT-based legacy API keys first, which
+   meant fully migrating to the newer `sb_secret_...` key format — which
+   we'd already confirmed **did not work with the Storage API**
+   ("Invalid Compact JWS" error). Deliberately stopped here rather than
+   risk breaking real working functionality (page image uploads) under
+   pressure, with no tested fallback in hand.
+3. **The actual root cause, found and fixed properly:** our Storage
+   requests only ever sent `Authorization: Bearer {key}`. Supabase's
+   gateway parses that header specifically as a JWT — which the classic
+   `service_role` key is, but the newer `sb_secret_...` format
+   deliberately isn't (it's an opaque string). Fix: also send the key via
+   a plain `apikey` header (the standard pattern across Supabase's own
+   client libraries, never JWT-dependent) — see `page_images.py`. Tested
+   directly against the real Storage API with the new key format: bucket
+   check succeeded, then a real image upload succeeded, then the actual
+   uploaded image was confirmed loading in a browser.
+4. **With that fix proven, the rest went cleanly:** switched
+   `SUPABASE_SERVICE_KEY` to the new `sb_secret_...` value, confirmed the
+   real deployed app still displayed page images correctly (a live
+   question, a real image rendering — the exact path most likely to
+   break if something were wrong), then disabled legacy JWT-based API
+   keys, re-verified our code still worked, and finally revoked the
+   original exposed key for good.
 
-**Deliberately stopped here, not proceeding further today:** the exposed
-key has been out for a couple of weeks with no signs of misuse so far;
-the marginal risk of a few more days is low, and lower than the risk of
-breaking working Storage uploads live with no tested alternative in hand.
+**Real, durable benefit beyond just closing this one exposure:** the
+underlying bug (not knowing how to authenticate with Supabase's newer
+key format) is now permanently fixed — any future key rotation should be
+a quick, routine task instead of a multi-session investigation.
 
-**Real next step, properly scoped rather than attempted live:** figure out
-and test whether `page_images.py`'s Storage authentication can work with
-the newer `sb_secret_...` key format (worth a fresh, careful look — this
-was only tried once, weeks ago, and rejected on the first error rather
-than investigated deeply), or find another supported path that doesn't
-require legacy JWT format. Test that path thoroughly *before* revoking
-anything, not after.
+**Note for next local ingestion run:** `SUPABASE_SERVICE_KEY` needs to be
+exported with the new `sb_secret_...` value in any fresh terminal session
+(same as the other API keys already used this way) — the old value is
+now permanently dead.
 
 ---
 
