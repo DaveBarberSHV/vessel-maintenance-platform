@@ -347,23 +347,59 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                     del manifest[old_key]
 
             file_chunks = chunk_document(path, metadata)
-            text_chunks = [c for c in file_chunks if c.has_text_layer and c.text.strip()]
+            # Vision-candidate threshold, not just "zero text" (Aug 2026,
+            # real gap found via a real production run): a page that's
+            # almost entirely a drawing/image can still have a handful of
+            # genuinely real, selectable text characters on it — a title
+            # block, a drawing number, a small label — which made it
+            # count as "has a text layer" under the original all-or-
+            # nothing rule, silently skipping vision extraction and
+            # leaving the actual dense drawing content never read at all.
+            # Confirmed directly: two real DWG files with known dense
+            # drawing content produced zero "trying vision extraction"
+            # output during a real ingestion run. A character-count
+            # threshold catches this — genuine manual text pages have far
+            # more than this; a bare title block doesn't. Deliberately
+            # generous (not just "more than a few words") since it's far
+            # better to run one unnecessary vision call on a border-case
+            # page than to silently under-detect a real drawing again.
+            VISION_CANDIDATE_CHAR_THRESHOLD = 200
+            text_chunks = [c for c in file_chunks if len(c.text.strip()) >= VISION_CANDIDATE_CHAR_THRESHOLD]
             no_text_chunks = [c for c in file_chunks if c not in text_chunks]
 
             # Vision extraction for pages with no text layer (Aug 2026) —
             # see setup note above. Each candidate page gets its image
-            # rendered (same function page_images.py already uses) and
-            # sent to Claude's vision API; if real text comes back, that
-            # page is promoted into text_chunks and flows through the
-            # exact same embed/store pipeline as every other page — no
-            # parallel system. A page vision genuinely can't read
+            # rendered (same function page_images.py already uses, but at
+            # a higher resolution — see render_page_image()'s docstring)
+            # and sent to Claude's vision API; if real text comes back,
+            # that page is promoted into text_chunks and flows through
+            # the exact same embed/store pipeline as every other page —
+            # no parallel system. A page vision genuinely can't read
             # anything on (blank separator pages, etc.) correctly stays
             # metadata-only, same as before.
+            #
+            # Grouped by page_number, not iterated per-chunk (Aug 2026,
+            # real bug fix): a single physical page can have MORE than
+            # one chunk — its main page-level chunk plus one or more
+            # dense-table sub-chunks (see split_dense_tables() above), all
+            # sharing the same page_number. Iterating per-chunk meant a
+            # sparse page with, say, two dense-table sub-chunks triggered
+            # THREE separate, redundant vision calls (and three identical
+            # renders) for the exact same image — confirmed directly via
+            # real production output showing the same page's "large-
+            # format" resolution note printed multiple times for what was
+            # actually one physical page. Grouping first means exactly
+            # one render and one vision call per distinct page, with the
+            # same transcribed result applied to every chunk on that page.
+            pages_needing_vision = {}
+            for c in no_text_chunks:
+                pages_needing_vision.setdefault(c.page_number, []).append(c)
+
             vision_extracted_count = 0
-            if vision_enabled and no_text_chunks:
-                print(f"  {len(no_text_chunks)} page(s) with no text layer — "
+            if vision_enabled and pages_needing_vision:
+                print(f"  {len(pages_needing_vision)} page(s) with no text layer — "
                       f"trying vision extraction...")
-                for c in no_text_chunks:
+                for page_number, chunks_for_page in pages_needing_vision.items():
                     try:
                         # Higher resolution than the citation-display
                         # default (Aug 2026, see page_images.py) — this
@@ -373,19 +409,21 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                         # real test: a dense rotation-direction table was
                         # genuinely unreadable at the default resolution.
                         image_bytes = page_images.render_page_image(
-                            path, c.page_number, resolution=300)
+                            path, page_number, resolution=300)
                         transcribed = vision_extraction.extract_text_from_image(image_bytes)
                         if transcribed:
-                            c.text = vision_extraction.format_vision_chunk_text(transcribed)
-                            c.has_text_layer = True
-                            text_chunks.append(c)
+                            formatted = vision_extraction.format_vision_chunk_text(transcribed)
+                            for c in chunks_for_page:
+                                c.text = formatted
+                                c.has_text_layer = True
+                                text_chunks.append(c)
                             vision_extracted_count += 1
                     except Exception as e:
                         print(f"    WARNING: vision extraction failed for page "
-                              f"{c.page_number} ({type(e).__name__}: {e}) — this page "
+                              f"{page_number} ({type(e).__name__}: {e}) — this page "
                               f"remains metadata-only.")
                 if vision_extracted_count:
-                    print(f"  {vision_extracted_count} of {len(no_text_chunks)} "
+                    print(f"  {vision_extracted_count} of {len(pages_needing_vision)} "
                           f"page(s) successfully transcribed via vision.")
 
             if text_chunks:

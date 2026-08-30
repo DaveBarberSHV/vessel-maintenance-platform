@@ -97,6 +97,40 @@ common case (screenshots, normal-sized pages, most drawings), and treat
 tiling as its own dedicated follow-up for specifically large-format
 sheets — not something to hold up today's real progress for.
 
+**Two more real bugs found and fixed via actual production use on Dave's
+real library, same day:**
+1. **A page with any real text at all, even a sparse title block, never
+   got vision-extracted.** The original trigger was "zero text," but a
+   real DWG file's title block (e.g. "DWG NO: M-5   REV: 2") counts as
+   non-empty text — meaning the drawing's actual dense content was never
+   read, only the sparse incidental text happened to be real. Confirmed
+   directly: two real DWG files produced zero "trying vision extraction"
+   output on a real ingestion run. Fixed with a character-count
+   threshold (200) rather than a zero/nonzero check — deliberately
+   generous, since running one unnecessary vision call on a border-case
+   page is far cheaper than silently missing a real drawing again.
+2. **Redundant, wasteful vision calls on the same physical page.** A
+   single page can have more than one chunk — its main page-level chunk
+   plus one or more dense-table sub-chunks (see the dense-table-splitting
+   entry elsewhere in this file), all sharing the same page number.
+   Iterating per-chunk rather than per-page meant a sparse page with two
+   sub-chunks triggered three separate, identical vision calls (and
+   three identical renders) for the same image — confirmed directly via
+   real output showing the same page's "large-format" resolution note
+   printed multiple times for what was actually one physical page. Fixed
+   by grouping candidate chunks by page number first: exactly one render
+   and one vision call per distinct physical page, with the result
+   applied to every chunk sharing that page — cutting real, unnecessary
+   API cost and time with no loss of coverage.
+
+Both fixes verified together on Dave's real production library
+(`AzimuthThruster_MBB_ShaftArrangementM1_DWG_Rev2.pdf` and the matching
+Z-Drive installation drawing): each now correctly shows exactly one
+"page(s) with no text layer" entry (matching the one genuinely sparse
+title/cover page in each file, not an inflated multi-chunk count), and
+each large-format resolution note now prints exactly once per file, not
+three or four times.
+
 ---
 
 ## Anticipated scaling issue — equipment dropdown will get unwieldy beyond drivetrain
