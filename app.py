@@ -218,18 +218,32 @@ with st.sidebar:
                         else:
                             st.warning("Please enter a note before submitting.")
 
-        st.caption("Past conversations")
+        # Grouped by recency (Aug 2026) — replaces a single flat list
+        # that was hard-capped at 20 conversations, past which older
+        # ones silently vanished from the sidebar with no indication
+        # anything was missing. Nothing is deleted; db.list_conversations
+        # now fetches a much larger practical limit, and
+        # group_conversations_by_recency() organizes the full list into
+        # Today/Yesterday/This Week/This Month/Older sections — the same
+        # pattern used by most chat apps for exactly this problem. Only
+        # non-empty groups are shown, so an empty "This Month" header
+        # never appears just because nothing happens to be in it.
         try:
             past = with_connection_retry(db.list_conversations, st.session_state.user_name)
         except Exception:
             past = []
-        for convo in past:
-            label = convo["first_message"][:40] + ("..." if len(convo["first_message"]) > 40 else "")
-            if st.button(label, key=f"convo_{convo['conversation_id']}", use_container_width=True):
-                st.session_state.conversation_id = str(convo["conversation_id"])
-                st.session_state.messages = with_connection_retry(
-                    db.load_conversation, str(convo["conversation_id"]))
-                st.rerun()
+        grouped = db.group_conversations_by_recency(past)
+        for group_name, convos in grouped.items():
+            if not convos:
+                continue
+            st.caption(group_name)
+            for convo in convos:
+                label = convo["first_message"][:40] + ("..." if len(convo["first_message"]) > 40 else "")
+                if st.button(label, key=f"convo_{convo['conversation_id']}", use_container_width=True):
+                    st.session_state.conversation_id = str(convo["conversation_id"])
+                    st.session_state.messages = with_connection_retry(
+                        db.load_conversation, str(convo["conversation_id"]))
+                    st.rerun()
 
 if not st.session_state.user_name:
     st.info("👋 Select your name in the sidebar to get started.")

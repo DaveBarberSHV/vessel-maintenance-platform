@@ -169,10 +169,20 @@ def load_conversation(conn, conversation_id: str) -> list[dict]:
     ]
 
 
-def list_conversations(conn, user_name: str, limit: int = 20) -> list[dict]:
+def list_conversations(conn, user_name: str, limit: int = 500) -> list[dict]:
     """One row per conversation: its id, the first question asked in it
     (for display), and when it started. Used to populate the sidebar
-    history list."""
+    history list.
+
+    limit raised from 20 to 500 (Aug 2026) — the old default of 20 was a
+    silent, hard cutoff: past that many conversations, older ones simply
+    stopped appearing in the sidebar at all, with no indication anything
+    was missing. There's no real storage-scale reason to cap this tightly
+    — Postgres handles many thousands of rows trivially — so this is now
+    a generous practical safety net rather than a real limit anyone is
+    expected to hit. See group_conversations_by_recency() below, which
+    is the real fix for a long list: grouping for display, not deleting
+    or hiding anything."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """
@@ -187,6 +197,50 @@ def list_conversations(conn, user_name: str, limit: int = 20) -> list[dict]:
         rows = cur.fetchall()
     rows.sort(key=lambda r: r["created_at"], reverse=True)
     return rows[:limit]
+
+
+def group_conversations_by_recency(conversations: list[dict]) -> dict[str, list[dict]]:
+    """Groups a flat list of conversations (each with a 'created_at') into
+    recency buckets for sidebar display — Today, Yesterday, This Week,
+    This Month, Older (Aug 2026). Replaces the old flat list capped at 20
+    — nothing is ever deleted; this only changes how the existing list is
+    grouped for display, since there's no real storage-scale reason to
+    delete anything, and the value of old troubleshooting history only
+    grows over time, not shrinks.
+
+    Only groups with at least one conversation should be shown by the
+    caller (app.py) — an empty "This Month" header with nothing under it
+    would just be visual noise.
+
+    Bucketing uses UTC dates throughout, matching how created_at is
+    stored (see get_connection()'s docstring — timestamps default to
+    Postgres's now(), which is UTC) — not each individual user's local
+    time zone, since there's no per-user timezone setting anywhere else
+    in this app. A conversation started right at a day boundary might
+    occasionally land in a slightly unexpected bucket; a reasonable
+    simplification for a sidebar grouping label, not worth building real
+    per-user timezone-awareness for."""
+    from datetime import datetime, timezone, timedelta
+
+    today = datetime.now(timezone.utc).date()
+    yesterday = today - timedelta(days=1)
+    week_start = today - timedelta(days=7)
+    month_start = today - timedelta(days=30)
+
+    groups = {"Today": [], "Yesterday": [], "This Week": [], "This Month": [], "Older": []}
+    for c in conversations:
+        c_date = c["created_at"].date()
+        if c_date == today:
+            groups["Today"].append(c)
+        elif c_date == yesterday:
+            groups["Yesterday"].append(c)
+        elif c_date >= week_start:
+            groups["This Week"].append(c)
+        elif c_date >= month_start:
+            groups["This Month"].append(c)
+        else:
+            groups["Older"].append(c)
+    return groups
 
 
 def new_conversation_id() -> str:
