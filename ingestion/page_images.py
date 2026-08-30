@@ -35,6 +35,13 @@ import requests
 STORAGE_BUCKET = "tm-page-images"
 RENDER_RESOLUTION = 150  # tested: good balance of legibility vs. file size (~70KB/page at this setting)
 
+# Claude's vision API hard limit on any single image dimension (Aug 2026,
+# found via a real error against a real large-format engineering
+# drawing: rendering it at 300 DPI for vision extraction produced an
+# image over 8000px on its long side and was rejected outright). See
+# render_page_image()'s dimension-clamping logic below.
+MAX_IMAGE_DIMENSION_PX = 8000
+
 
 def get_supabase_storage_config() -> tuple[str, str]:
     """Returns (project_url, service_role_key). Deliberately separate
@@ -103,13 +110,45 @@ def should_render_page(page_number: int, pages_with_text: set[int]) -> bool:
     )
 
 
-def render_page_image(pdf_path: Path, page_number: int) -> bytes:
+def render_page_image(pdf_path: Path, page_number: int, resolution: int = RENDER_RESOLUTION) -> bytes:
     """Renders one page to PNG bytes. Requires genuine PDF bytes (same
     requirement as table extraction elsewhere in this pipeline) — will
-    raise if given the platform-preprocessed preview format instead."""
+    raise if given the platform-preprocessed preview format instead.
+
+    resolution is overridable (Aug 2026) — the default (150) is tuned for
+    citation-display images (legibility vs. file size/storage, since
+    these get uploaded and stored). Vision extraction (see
+    vision_extraction.py) calls this with a much higher resolution
+    instead: that image is only used transiently for one API call, never
+    stored, so there's no file-size cost to rendering it sharper — and a
+    real test against a dense drawing showed a small table genuinely
+    unreadable (blurry even zoomed in 6x) at the default resolution,
+    confirmed as a source-resolution problem, not a vision-model
+    weakness.
+
+    The requested resolution is automatically clamped down (never up) so
+    neither output dimension exceeds MAX_IMAGE_DIMENSION_PX (Aug 2026,
+    real bug fix) — a real large-format engineering drawing rendered at
+    300 DPI exceeded Claude's vision API's 8000px limit on its long side
+    and was rejected outright. Clamping degrades gracefully (a large
+    drawing gets the highest DPI that still fits, rather than erroring
+    completely) instead of failing the whole page."""
     with pdfplumber.open(pdf_path) as pdf:
         page = pdf.pages[page_number - 1]  # pdfplumber is 0-indexed; our page numbers are 1-indexed
-        im = page.to_image(resolution=RENDER_RESOLUTION)
+
+        # page.width/height are in points (1/72 inch, the PDF standard
+        # unit) — convert the pixel limit into an equivalent DPI ceiling
+        # for each dimension, then never exceed the smaller of the two.
+        safe_dpi_w = (MAX_IMAGE_DIMENSION_PX / page.width) * 72
+        safe_dpi_h = (MAX_IMAGE_DIMENSION_PX / page.height) * 72
+        safe_resolution = min(resolution, int(safe_dpi_w), int(safe_dpi_h))
+        if safe_resolution < resolution:
+            print(f"    Note: page {page_number} is large-format — using "
+                  f"{safe_resolution} DPI instead of the requested {resolution} "
+                  f"to stay within the vision API's {MAX_IMAGE_DIMENSION_PX}px "
+                  f"image size limit.")
+
+        im = page.to_image(resolution=safe_resolution)
         from io import BytesIO
         buf = BytesIO()
         im.save(buf, format="PNG")

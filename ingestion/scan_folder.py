@@ -290,6 +290,30 @@ def scan_folder(folder: Path, engine: str = "voyage"):
               f"skipping for any EquipmentList documents this run (normal chunking is "
               f"unaffected). See docs/architecture.md.\n")
 
+    # Vision extraction for image-only pages (Aug 2026) — optional: needs
+    # ANTHROPIC_API_KEY, same as equipment extraction above. Real
+    # motivating case: wiring diagrams and dense drawings often have NO
+    # text layer at all, so their content was previously invisible to
+    # search entirely — an engineer asking about a labeled component on a
+    # drawing got nothing back, even though the label is right there on
+    # the page. See vision_extraction.py and BACKLOG.md for the full
+    # two-tier reasoning (this only ever transcribes visible text, never
+    # interprets arrows/symbols/relationships).
+    vision_enabled = False
+    try:
+        import page_images  # noqa: F811 — render_page_image() doesn't need
+        # Storage credentials, only the upload step does; importing here
+        # independently of images_enabled above ensures this works even
+        # if only ANTHROPIC_API_KEY is set and Storage isn't configured.
+        import vision_extraction
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise ValueError("ANTHROPIC_API_KEY not set")
+        vision_enabled = True
+    except Exception as e:
+        print(f"Note: vision extraction for image-only pages isn't available right now "
+              f"({e}) — those pages will remain metadata-only, not full-text searchable, "
+              f"this run. See BACKLOG.md.\n")
+
     new_chunk_count = 0
     failed_during_processing = []
 
@@ -324,6 +348,45 @@ def scan_folder(folder: Path, engine: str = "voyage"):
 
             file_chunks = chunk_document(path, metadata)
             text_chunks = [c for c in file_chunks if c.has_text_layer and c.text.strip()]
+            no_text_chunks = [c for c in file_chunks if c not in text_chunks]
+
+            # Vision extraction for pages with no text layer (Aug 2026) —
+            # see setup note above. Each candidate page gets its image
+            # rendered (same function page_images.py already uses) and
+            # sent to Claude's vision API; if real text comes back, that
+            # page is promoted into text_chunks and flows through the
+            # exact same embed/store pipeline as every other page — no
+            # parallel system. A page vision genuinely can't read
+            # anything on (blank separator pages, etc.) correctly stays
+            # metadata-only, same as before.
+            vision_extracted_count = 0
+            if vision_enabled and no_text_chunks:
+                print(f"  {len(no_text_chunks)} page(s) with no text layer — "
+                      f"trying vision extraction...")
+                for c in no_text_chunks:
+                    try:
+                        # Higher resolution than the citation-display
+                        # default (Aug 2026, see page_images.py) — this
+                        # image is only used transiently for the vision
+                        # call, never stored, so there's no cost to
+                        # rendering it sharper. Confirmed necessary by a
+                        # real test: a dense rotation-direction table was
+                        # genuinely unreadable at the default resolution.
+                        image_bytes = page_images.render_page_image(
+                            path, c.page_number, resolution=300)
+                        transcribed = vision_extraction.extract_text_from_image(image_bytes)
+                        if transcribed:
+                            c.text = vision_extraction.format_vision_chunk_text(transcribed)
+                            c.has_text_layer = True
+                            text_chunks.append(c)
+                            vision_extracted_count += 1
+                    except Exception as e:
+                        print(f"    WARNING: vision extraction failed for page "
+                              f"{c.page_number} ({type(e).__name__}: {e}) — this page "
+                              f"remains metadata-only.")
+                if vision_extracted_count:
+                    print(f"  {vision_extracted_count} of {len(no_text_chunks)} "
+                          f"page(s) successfully transcribed via vision.")
 
             if text_chunks:
                 # Compute embeddings ourselves first (rather than inside

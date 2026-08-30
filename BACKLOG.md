@@ -5,6 +5,100 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## ✅ RESOLVED (for normal pages) / 🔲 OPEN (for large-format drawings) — Vision extraction for image-only pages
+
+**What:** Real, high-priority request from Dave: drawings, wiring
+diagrams, and dense control-panel screenshots often have NO text layer at
+all, so their content was previously invisible to search entirely — an
+engineer asking "what is the wiring for the Forward Bridge Control
+Panel?" got nothing back, even though that exact label is annotated
+right on the drawing. Two real, concrete motivating examples from Dave:
+finding a wiring diagram by a labeled component, and finding a shaft
+arrangement schematic and asking a real question about it (propeller
+rotation direction) that's answered in plain text on the drawing itself.
+
+**Two-tier framing, established before building anything:** Tier 1 is
+transcription (reading and listing every visible label verbatim) — an
+OCR-strength problem, safe to trust. Tier 2 would be interpretation
+(reasoning about arrows, symbols, spatial relationships) — a
+meaningfully harder, less-proven problem, deliberately NOT built, since
+getting something like rotation direction wrong from misread arrows
+could matter for a real maintenance decision. Everything below is Tier 1
+only.
+
+**Built:**
+- `ingestion/vision_extraction.py` — sends a page's rendered image to
+  Claude's vision API with a prompt strictly scoped to verbatim
+  transcription, not interpretation.
+- `ingestion/scan_folder.py` — any page with no text layer automatically
+  gets this treatment during normal ingestion (needs `ANTHROPIC_API_KEY`,
+  same on/off-by-key-presence pattern as the equipment registry). A
+  successful transcription is wrapped with a clear "AI-transcribed from
+  a drawing/image" marker and flows into the exact same chunk/embed/
+  store/retrieve pipeline as every other page — no parallel system. A
+  page vision genuinely can't read anything on stays metadata-only, same
+  as before; a failure on one page never breaks the rest of the file's
+  ingestion.
+- `ingestion/page_images.py` — `render_page_image()` now accepts an
+  optional higher resolution specifically for vision extraction (the
+  image is only used transiently for one API call, never stored, so
+  there's no file-size cost to rendering it sharper than the citation-
+  display default).
+
+**Real bugs found and fixed via actual live testing, not just
+theoretical review:**
+1. **Wrong default media type.** `extract_text_from_image()` originally
+   defaulted to `image/jpeg`, based on early test images from an
+   unrelated source. `render_page_image()` — the actual real production
+   source of every image this function receives — always outputs PNG.
+   This caused a real, reproducible 400 error the first time this was
+   tried against a genuine production image. Fixed: default is now
+   `image/png`, matching actual real usage.
+2. **Exceeding the vision API's image size limit.** A real large-format
+   engineering drawing (a 34"×22"-class sheet) rendered at the higher
+   resolution exceeded Claude's vision API's hard 8000px-per-side limit
+   and was rejected outright. Fixed: `render_page_image()` now
+   calculates the page's actual physical size and automatically clamps
+   the resolution down (never up) to the highest value that keeps both
+   dimensions safely under the limit — a normal-sized page is completely
+   unaffected; only genuinely oversized drawings get clamped.
+
+**Verified live, two real test cases, both revealing something real:**
+- A Berg Propulsion ECR control-panel screenshot (no text layer at all,
+  confirmed the existing extraction only ever captured a page number and
+  a caption): full vision transcription correctly captured every real
+  label — "PROPELLER IN SERVICE," "MAIN CLUTCH ENGAGED," "Bridge Forward
+  / In Command," live gauge readouts, all of it. A genuinely strong,
+  trustworthy result.
+- Dave's own real, production shaft arrangement drawing (large-format):
+  even after both bug fixes, the drawing is physically large enough that
+  the 8000px limit forces a real trade-off — fit the whole sheet in one
+  image, or read fine print clearly, not both at once. Claude's actual
+  response here is worth noting as a genuinely reassuring property, not
+  a failure: it explicitly said the resolution made much of the small
+  text "very difficult to read with complete accuracy" and listed only
+  what it could confidently transcribe, rather than guessing or
+  inventing plausible-looking text for the parts it couldn't read. This
+  is exactly the honest-under-uncertainty behavior that matters most for
+  something like a rotation-direction table, where a wrong guess is
+  worse than no answer.
+
+**Deliberately not built yet — the real fix for large-format drawings
+specifically, not a blocker for shipping the rest:** tile a large page
+into several overlapping sections, each covering a smaller physical
+area so it can render at a much higher effective resolution while
+staying under the 8000px limit, run vision extraction on each tile
+separately, and combine the results. Real trade-off to weigh when this
+gets built: several API calls per large drawing instead of one — worth
+it for a page that genuinely needs it, not something to apply blindly to
+every page in the library. Dave's explicit call (Aug 2026): ship the
+current version, which already provides real, verified value for the
+common case (screenshots, normal-sized pages, most drawings), and treat
+tiling as its own dedicated follow-up for specifically large-format
+sheets — not something to hold up today's real progress for.
+
+---
+
 ## Anticipated scaling issue — equipment dropdown will get unwieldy beyond drivetrain
 
 **What:** Both the Engineer Notes equipment dropdown and the equipment

@@ -88,6 +88,22 @@ flowchart LR
   clarifying-question feature below: a question that used to require
   asking "which model do you mean?" often now gets answered directly,
   since the registry already knows what's installed.
+- **Vision extraction for image-only pages.** Added Aug 2026 — drawings,
+  wiring diagrams, and dense control-panel screenshots often have no text
+  layer at all, so their content was previously invisible to search
+  entirely. `ingestion/vision_extraction.py` sends any such page's image
+  to Claude's vision API, scoped strictly to verbatim transcription of
+  visible labels (not interpretation of arrows/symbols/relationships —
+  see `BACKLOG.md` for the full two-tier reasoning). Runs automatically
+  in `scan_folder.py` for any page with no text layer, flowing into the
+  exact same chunk/embed/store pipeline as every other page. Verified
+  live against a real control-panel screenshot with strong results;
+  large-format engineering drawings (wide sheets) hit a real, known
+  limit — Claude's vision API caps any image dimension at 8000px, which
+  forces a real trade-off between fitting a big sheet whole versus
+  reading its fine print clearly. A real fix (tiling a large page into
+  higher-resolution sections) is scoped but deliberately not built yet
+  — see `BACKLOG.md`.
 
 ## Query time (engineer asks a question, gets a cited answer)
 
