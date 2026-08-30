@@ -5,6 +5,96 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## ✅ First real review of accumulated 👍/👎 feedback (Aug 2026) — 2 real bugs found, 1 open question
+
+**What:** The first genuine review of real feedback data since the
+feature was built — 10 👍, 5 👎 at review time. Built
+`review_feedback.py` (repo root) for this: pulls every downvoted answer
+with its original question and any safety info/field notes shown
+alongside it, so review happens against real data, not memory. Reusable
+any time this needs doing again — see the diagnostic tooling entry
+below.
+
+**Findings, one at a time:**
+
+1. **Bearing temperature question** — the app correctly said the
+   excerpts didn't cover bearing temperature alarm limits. **Still open:
+   needs Dave/Jared to confirm** whether a document with this
+   information actually exists in the library at all. If it doesn't,
+   this isn't an app problem — it's a "this document needs to be added"
+   gap.
+
+2. **"How many times has the Port Engine had a DEF Tank Volume alarm?"**
+   — **root-caused with real evidence, real fix scoped.** The correct
+   answer (event code 4367-1, 63 occurrences) is on page 8 of the real
+   service report, confirmed present via `inspect_page.py` — so this was
+   never a missing-document problem. A `--dry-run` query showed the real
+   cause: page 8's vision-transcribed content became **one large chunk
+   covering eight different alarm codes at once**, diluting its
+   embedding's relevance to a question about any single one — it landed
+   at rank 14 of results, far outside what's normally retrieved. A
+   direct `query_chunks(top_k=20)` check confirmed this precisely rather
+   than guessing (page 8 appeared at position 14, not "just below the
+   cutoff" — ruling out a quick `top_k` bump as an honest fix, since
+   raising `top_k` to always fetch enough to catch this would add real
+   cost and latency to every question, not just this pattern).
+   **Real fix, not yet built:** extend the dense-table chunk-splitting
+   logic that already exists for native-text tables (see the relevant
+   entry elsewhere in this file) to vision-extracted pages too — each
+   alarm code (or a small group of them) becoming its own chunk should
+   let page 8's DEF-specific content retrieve strongly on its own, with
+   zero added cost to unrelated questions. **Judged to have real,
+   broader value, not a one-off fix:** the same dilution problem will
+   recur for any future vision-extracted page packed with several
+   distinct, similar-looking facts (diagnostic logs, parts lists, spec
+   tables) — a real and recurring shape for service reports and CAT ET
+   exports specifically. Confirmed NOT to help drawing/schematic lookup
+   questions (different shape entirely — those want the whole page as
+   one chunk, which is already working, per the wiring diagram and shaft
+   arrangement tests earlier the same day).
+
+3. **"Why don't you see code 4367-1 on page 8?"** — same underlying
+   retrieval miss as #2 above (the correct page just wasn't retrieved),
+   plus one distinct, separate, and important wording bug worth fixing
+   on its own: the model claimed the document "has not been provided to
+   me... and is not among the manual excerpts" — flatly wrong, since the
+   document was confirmed already in the system. **Real fix, not yet
+   built, but small and independent of #2's bigger fix:** the model
+   should never claim a document doesn't exist in the system at all —
+   only that it wasn't found *for this specific search*. A likely quick
+   SYSTEM_PROMPT wording fix.
+
+4. **"Can you show me the Azimuth Thruster Schematic?"** and 5.
+   **"Are there any more drawings available for the Azimuth Thruster?"**
+   — **root-caused with real evidence, revealed a genuinely different
+   problem from #2/#3, not the same fix.** A direct `query_chunks(top_k=20)`
+   check for question 5's exact phrasing showed the real Shaft
+   Arrangement drawing **not appearing anywhere in the top 20 results at
+   all** — a much bigger miss than #2's "ranked too low." The real
+   distinction: #2/#3 were about *content* ("what does this number
+   say"), retrievable in principle with better chunking. This is an
+   **inventory question** — "what documents exist about this topic" —
+   and no page of an actual drawing contains anything resembling "here
+   is a list of drawings," so no amount of better chunking fixes a
+   question whose intent doesn't semantically resemble any actual page
+   content. **Likely real fix, not yet built:** the same pattern already
+   proven for the vessel equipment registry and Engineer Notes — a
+   small, always-injected-into-every-prompt list of "what
+   drawings/documents exist per system," independent of semantic search
+   finding it, rather than trying to make retrieval solve a fundamentally
+   different kind of question than it's suited for.
+   **Real, separate anomaly spotted while investigating, not yet
+   explained:** that same `query_chunks` output showed 4 identical
+   duplicate entries (same page, same exact distance) at ranks 3–6 —
+   worth a real look, cause unknown.
+
+**Deliberately not tackled tonight** — both real fixes (#2's chunk-
+splitting extension, #4/#5's always-inject document inventory) are
+real, somewhat involved pieces of work, better done fresh than rushed
+at the end of a long investigative session. Dave's explicit call.
+
+---
+
 ## ✅ RESOLVED (for normal pages) / 🔲 OPEN (for large-format drawings) — Vision extraction for image-only pages
 
 **What:** Real, high-priority request from Dave: drawings, wiring

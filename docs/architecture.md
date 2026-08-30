@@ -233,6 +233,42 @@ completed first — see git history for that early build order):**
 - The maritime rebrand — "Fathom - Polaris," professional theme, hidden
   developer chrome
 
+## Diagnostic tooling (repo root, run locally — not part of the deployed app)
+
+A small set of standalone scripts built for real troubleshooting, worth
+knowing about rather than rediscovering each time a similar need comes
+up:
+
+- **`review_feedback.py`** — pulls every 👎 (and a 👍 count for context)
+  from real chat history, with the original question and any safety
+  info/field notes shown alongside it. Used for the first real review of
+  accumulated feedback (Aug 2026) — see `BACKLOG.md` for what it found.
+- **`ingestion/inspect_page.py`** — shows exactly what's stored in
+  `tm_chunks` for a specific document/page, bypassing retrieval
+  entirely. The way to check ground truth — "is this content actually in
+  the system at all" — independent of whether search happens to find it
+  for a given question.
+- **`ingestion/reprocess_file.py`** — clears a specific file's chunks and
+  manifest entry so the next `scan_folder.py` run treats it as brand new
+  (see the vision-extraction entry in `BACKLOG.md` for why this was
+  needed — ingestion's hash-based skip logic won't revisit an unchanged
+  file just because ingestion logic improved).
+- **`answer_query.py --dry-run`** — already existed, but worth pairing
+  with the tools above: shows the exact prompt, retrieved chunks, and
+  their distances for a real question, without spending an API call on
+  an actual answer.
+
+**The real investigative pattern that emerged from using these together
+(Aug 2026):** `--dry-run` shows what got retrieved and how well it
+ranked; `inspect_page.py` confirms what's actually stored, independent
+of ranking; a direct `retrieval.query_chunks(..., top_k=20)` call (no
+script needed, just a one-line Python command) shows how far down the
+list correct content really sits, distinguishing "just below a
+reasonable cutoff" from "not retrievable through this kind of question
+at all." Together, these turn "the answer seems wrong" into a precise,
+evidence-based diagnosis — real vs. missing content, and retrieval miss
+vs. reasoning miss — rather than guessing.
+
 ## Not yet on this diagram (known future moves)
 
 - A real password/access gate before the wider crew gets the URL —
