@@ -131,6 +131,35 @@ title/cover page in each file, not an inflated multi-chunk count), and
 each large-format resolution note now prints exactly once per file, not
 three or four times.
 
+**Full end-to-end validation against the exact three questions that
+originally motivated this whole feature (Aug 2026)** — asked live, on
+the real deployed app, against the newly vision-extracted drawings:
+1. *"What is the wiring for the Forward Bridge Control Panel?"* —
+   correctly returned real terminal numbers, cable gauges, and part
+   numbers in organized tables, with its own honest caveat that this is
+   AI-transcribed and safety-critical routing should be confirmed
+   against the original sheet.
+2. *"I am looking for the schematic of the Shaft Arrangement, can you
+   provide it?"* — correctly found and identified the real drawing
+   (number, vessel, views included), and honestly stated it couldn't
+   read finer dimension callouts — directly consistent with the known,
+   deliberately-deferred large-format resolution limit above, not a
+   new problem. The right kind of humility: confirming what it knows
+   rather than guessing at what it doesn't.
+3. *"What direction do the propellers turn when going ahead?"* — the
+   strongest result: correctly retrieved the plain-text rotation fact
+   AND correctly reasoned that because this is an azimuth thruster,
+   "ahead" is determined by which way the whole unit is pointed, not by
+   reversing propeller rotation — genuine synthesis, not just lookup.
+
+**One real, open design question this surfaced, not yet resolved:** for
+question 2, the actual drawing image is genuinely present, but tucked
+inside the collapsed "View Sources" section rather than shown
+automatically. Dave's read: fine for now, not urgent. Worth a real
+decision later: should a request phrased as directly as "can you
+provide it" cause the relevant image to display automatically in the
+answer itself, rather than requiring an extra click to find it?
+
 ---
 
 ## Anticipated scaling issue — equipment dropdown will get unwieldy beyond drivetrain
