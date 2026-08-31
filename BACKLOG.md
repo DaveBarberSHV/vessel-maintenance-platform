@@ -294,6 +294,25 @@ once other systems are added.
 to be ingested (not urgent before then) — no need to build this ahead of
 having a second real system's data to test it against.
 
+**Related, one level down (Aug 2026):** the same shape of problem is
+starting on the *subsystem* level, not just across systems. Raised
+proactively by Dave while naming a real batch of new DEF (Diesel Exhaust
+Fluid) documents — DEF is part of the Main Engine's aftertreatment
+system, not an independent system of its own, so these are correctly
+named `MainEngines_...` with the distinction carried by `[DocType]`
+(e.g. `DEFSystemOMM`, `DEFTankSpec`, `DEFTraining`) rather than inventing
+a new top-level system. Dave's own read, which this agrees with: engines
+have many real subsystems (fuel, cooling, lubrication, turbocharger,
+aftertreatment/DEF...), and if several of them each accumulate a real
+document cluster, "Main Engines" could get genuinely cluttered the same
+way the flat equipment list would. **Not worth building anything for
+yet** — a handful of DEF documents doesn't justify a naming overhaul,
+and `DocType` already solves what's needed today. **Trigger to revisit:**
+once several engine subsystems each have a real document cluster and
+finding things by scrolling actually starts to hurt — likely the same
+underlying fix as above (an explicit, structured level between "system"
+and individual document), just one level deeper.
+
 ---
 
 ## Pre-demo cleanup checklist — not urgent, but don't forget before showing this to anyone new
