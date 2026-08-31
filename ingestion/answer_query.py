@@ -63,6 +63,39 @@ UNIT_CONVERSIONS = [
             ("MPa", lambda psi: psi * 0.00689476),
         ],
     },
+    {
+        "name": "torque_lbft",
+        "source_label": "lb-ft",
+        "pattern": re.compile(
+            r"(-?\d+(?:\.\d+)?)\s*(?:lb-?ft\b|ft-?lbs?\b|lbf-?ft\b|foot-?pounds?\b)",
+            re.IGNORECASE,
+        ),
+        "targets": [
+            ("N·m", lambda lbft: lbft * 1.35582),
+        ],
+    },
+    {
+        "name": "inches",
+        "source_label": "in",
+        "pattern": re.compile(r'(-?\d+(?:\.\d+)?)\s*(?:inches\b|inch\b|")', re.IGNORECASE),
+        "targets": [
+            ("mm", lambda inch: inch * 25.4),
+        ],
+    },
+    {
+        "name": "feet",
+        "source_label": "ft",
+        # Negative lookahead avoids double-matching "ft" inside torque
+        # notation like "50 ft-lbs" — that's the torque_lbft entry
+        # above's job, not this one's.
+        "pattern": re.compile(
+            r"(-?\d+(?:\.\d+)?)\s*(?:feet\b|foot\b|ft\b(?!-?lbs?\b))",
+            re.IGNORECASE,
+        ),
+        "targets": [
+            ("m", lambda ft: ft * 0.3048),
+        ],
+    },
 ]
 
 
@@ -111,6 +144,16 @@ they try rephrasing — never tell them to upload or provide something that \
 may already exist in the system; that's a real, misleading claim you're not \
 in a position to make.
 - Every claim in your answer must be traceable to one of the excerpts.
+- When stating a value that has a unit (temperature, pressure, torque, \
+length, etc.), always lead with the units the crew actually operates in — \
+°F for temperature, psi for pressure, lb-ft for torque, inches/feet for \
+length — even when the source excerpt states it natively in metric (common \
+in German/European manuals). Include the metric value in parentheses as a \
+secondary reference if useful, but never lead with metric or state metric \
+alone. This applies regardless of which unit the excerpt itself happens to \
+use — don't just mirror the source's units. If you're not confident in a \
+conversion, state the value exactly as given in the excerpt rather than \
+guess at converting it.
 - Be concise and procedural — the reader is a working engineer, not someone \
 who wants prose. Use numbered steps when the excerpt describes a procedure.
 - Do not include a "Sources" list in your answer — the application displays \
