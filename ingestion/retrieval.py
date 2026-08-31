@@ -26,6 +26,7 @@ Usage:
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -393,6 +394,132 @@ def query_chunks(question: str, engine: str = "voyage", top_k: int = 5) -> list[
         # Same reasoning as get_voyage_key() above — this function is
         # imported directly by the front end, so no sys.exit() here.
         raise ValueError(f"Unknown engine '{engine}'. Use 'voyage' or 'tfidf'.")
+
+
+# Exact-code hybrid search (Aug 2026) — see BACKLOG.md's DEF alarm entry
+# for the full real investigation this came from. Semantic/vector search
+# is genuinely the wrong tool for a specific alphanumeric identifier —
+# a fault code, valve number, or switch number has little inherent
+# semantic meaning for an embedding model to grab onto, unlike a phrase
+# like "how do I check the oil level." Real evidence: even after
+# correctly splitting a dense alarm-code table into small, focused
+# chunks, the chunk containing the exact code a real question asked
+# about still didn't rank in a usable top-15 — confirming this isn't a
+# chunk-size problem, it's a search-method problem. The fix: when a
+# question contains something that looks like a specific code, search
+# for it directly and literally, and always include a real match
+# regardless of how it ranks semantically.
+CODE_LIKE_PATTERN = re.compile(
+    r"\b(\d{2,5}\s*-\s*\d{1,4}|[A-Za-z]{1,4}-\d{1,5})\b"
+)
+
+
+def extract_code_like_terms(question: str) -> list[str]:
+    """Finds tokens in a question that look like a specific alphanumeric
+    identifier — a fault code ("4367-1"), a letter-prefixed valve/switch
+    number ("V-204"), etc. — rather than an ordinary number or word.
+    Deliberately generous: a false-positive match here just means one
+    extra, harmless literal search gets run alongside the normal
+    semantic one; a false negative means a real exact-code question
+    keeps failing the way the DEF alarm case did. Returns terms with
+    internal whitespace normalized around hyphens (so "4367-1" and
+    "4367 - 1" extract to the same term), matching the normalization
+    keyword_search_chunks() applies when searching stored text."""
+    matches = CODE_LIKE_PATTERN.findall(question)
+    normalized = []
+    for m in matches:
+        norm = re.sub(r"\s*-\s*", "-", m.strip())
+        if norm not in normalized:
+            normalized.append(norm)
+    return normalized
+
+
+def keyword_search_chunks(terms: list[str], limit_per_term: int = 20) -> list[dict]:
+    """Literal text search for specific code-like terms, independent of
+    and complementary to query_chunks()'s semantic search. Returns
+    results in the exact same shape (text/metadata/distance) so they can
+    be merged directly with semantic results and used identically by
+    build_prompt().
+
+    Whitespace around hyphens is normalized on BOTH sides of the
+    comparison (Aug 2026, a real, observed case) — vision-transcribed
+    text can render the same code inconsistently (a real example: "4367-1"
+    in a question vs. "4367- 1", with a stray space, in the actual stored
+    chunk text) — a naive substring match would silently miss this exact
+    scenario, the one this whole mechanism exists to catch.
+
+    distance is set to -1.0 for every result — a sentinel meaning "exact
+    literal match," deliberately outside the normal semantic distance
+    range (which is always >= 0), so a caller inspecting distances can
+    tell a keyword match apart from a semantic one if it matters, without
+    needing a separate return shape.
+
+    limit_per_term raised from 5 to 20 (Aug 2026, real bug found via a
+    real run) — the query has no explicit ORDER BY, so when a code
+    appears in more matches than the limit, Postgres returns an
+    arbitrary subset. A real test showed this cost exactly the wrong
+    thing: 5 general-documentation matches came back, silently excluding
+    the one real service-report match with the actual occurrence data —
+    the specific answer the whole mechanism exists to find. Exact-code
+    matches are inherently rare to begin with, so a generous limit costs
+    little in practice while meaningfully reducing the risk of dropping
+    the one chunk that actually matters."""
+    if not terms:
+        return []
+    conn = get_pg_connection()
+    results = []
+    seen_fingerprints = set()
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        for term in terms:
+            # The literal '%' wildcard characters are wrapped around the
+            # term IN PYTHON, not embedded in the SQL string itself (Aug
+            # 2026, real bug fix) — psycopg2 uses Python's old-style %
+            # string formatting for parameter substitution, so a literal
+            # '%' character written directly in the SQL text collides
+            # with that mechanism and breaks it ("tuple index out of
+            # range"), confirmed via a real run against the actual
+            # database. Wrapping the term first and passing the whole
+            # thing as one parameter avoids the collision entirely, and
+            # regexp_replace still normalizes hyphens correctly within
+            # it, since a plain '%' character isn't touched by that
+            # pattern.
+            wrapped_term = f"%{term}%"
+            cur.execute(
+                f"""
+                SELECT text, document_title, revision, page_number, total_pages,
+                       equipment_model, document_type, source_file, page_image_url
+                FROM {PG_TABLE}
+                WHERE regexp_replace(text, '\\s*-\\s*', '-', 'g')
+                      ILIKE regexp_replace(%s, '\\s*-\\s*', '-', 'g')
+                LIMIT %s
+                """,
+                (wrapped_term, limit_per_term),
+            )
+            for r in cur.fetchall():
+                # Cheap de-dup fingerprint — query_chunks() doesn't return
+                # a chunk_id, so this is a reasonable proxy: the same
+                # page's same opening text is almost certainly the same
+                # chunk, whether reached via this term or another.
+                fingerprint = (r["document_title"], r["page_number"], r["text"][:80])
+                if fingerprint in seen_fingerprints:
+                    continue
+                seen_fingerprints.add(fingerprint)
+                results.append({
+                    "text": r["text"],
+                    "metadata": {
+                        "document_title": r["document_title"],
+                        "revision": r["revision"],
+                        "page_number": r["page_number"],
+                        "total_pages": r["total_pages"],
+                        "equipment_model": r["equipment_model"],
+                        "document_type": r["document_type"],
+                        "source_file": r["source_file"],
+                        "page_image_url": r["page_image_url"],
+                    },
+                    "distance": -1.0,
+                })
+    conn.close()
+    return results
 
 
 def query(question: str, engine: str = "voyage", top_k: int = 5):

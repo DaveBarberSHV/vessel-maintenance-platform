@@ -22,7 +22,7 @@ import os
 import re
 import sys
 
-from retrieval import query_chunks
+from retrieval import query_chunks, extract_code_like_terms, keyword_search_chunks
 
 
 # Real case that motivated this (Aug 2026, Jared's first live test): "We
@@ -215,6 +215,38 @@ def parse_structured_response(raw_text: str) -> dict:
     return result
 
 
+def add_exact_code_matches(question: str, chunks: list[dict]) -> list[dict]:
+    """If the question contains something that looks like a specific
+    code/identifier (see retrieval.extract_code_like_terms), searches
+    for it literally and merges any real matches into the semantic
+    results — ensuring an exact match is never missing just because it
+    ranked poorly semantically. Real motivating case (Aug 2026, see
+    BACKLOG.md's DEF alarm entry): even a correctly, tightly split chunk
+    for a specific fault code didn't reliably rank in a usable top-15 —
+    confirming this needed a different search method, not just smaller
+    chunks. De-dupes against chunks already present from semantic
+    search, using the same fingerprint keyword_search_chunks() uses
+    internally, so a term that already ranked well doesn't get added
+    twice."""
+    terms = extract_code_like_terms(question)
+    if not terms:
+        return chunks
+    keyword_matches = keyword_search_chunks(terms)
+    if not keyword_matches:
+        return chunks
+
+    existing_fingerprints = {
+        (c["metadata"]["document_title"], c["metadata"]["page_number"], c["text"][:80])
+        for c in chunks
+    }
+    new_matches = [
+        m for m in keyword_matches
+        if (m["metadata"]["document_title"], m["metadata"]["page_number"], m["text"][:80])
+        not in existing_fingerprints
+    ]
+    return chunks + new_matches
+
+
 def build_prompt(question: str, chunks: list[dict], equipment_context: str = "",
                   previous_exchange: dict | None = None, notes_context: str = "") -> str:
     excerpt_blocks = []
@@ -308,6 +340,7 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
         search_text = f"{previous_exchange['question']} {question}"
     search_query = expand_units(search_text)
     chunks = query_chunks(search_query, engine=engine, top_k=top_k)
+    chunks = add_exact_code_matches(question, chunks)
 
     equipment_context = ""
     try:
@@ -416,6 +449,7 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
             search_text = f"{previous_exchange['question']} {question}"
         search_query = expand_units(search_text)
         chunks = query_chunks(search_query, engine=engine, top_k=top_k)
+        chunks = add_exact_code_matches(question, chunks)
         equipment_context = ""
         try:
             from retrieval import get_pg_connection

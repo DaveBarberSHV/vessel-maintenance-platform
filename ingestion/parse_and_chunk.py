@@ -102,7 +102,16 @@ def detect_section(text: str) -> str | None:
 # the header row repeated for column-label context, so a query can match a
 # single row (or small group of rows) directly instead of competing with
 # every other row on the page.
-TABLE_ROW_THRESHOLD = 8
+#
+# Lowered from 8 to 6 (Aug 2026, real evidence, not a guess): a real
+# 8-alarm-code table (see BACKLOG.md's DEF alarm entry) sat right at the
+# old threshold and was never split — its single chunk had to represent
+# eight distinct alarm codes at once, and the one a real question needed
+# ranked outside what normally gets retrieved. 8 was demonstrably too
+# permissive at least once in practice; 6 (matching the existing group
+# size below) catches that real case while still leaving genuinely small
+# tables alone.
+TABLE_ROW_THRESHOLD = 6
 TABLE_ROW_GROUP_SIZE = 6
 
 

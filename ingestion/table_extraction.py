@@ -21,6 +21,7 @@ Usage:
     python table_extraction.py <path/to.pdf> <page_number>   # 1-indexed page, for manual testing
 """
 
+import re
 import sys
 
 import pdfplumber
@@ -91,6 +92,55 @@ def render_as_markdown(rows: list[list[str]]) -> str:
     for row in rows[1:]:
         lines.append("| " + " | ".join(c.replace("\n", " ") for c in row) + " |")
     return "\n".join(lines)
+
+
+def parse_markdown_tables(text: str) -> list[list[list[str]]]:
+    """Finds and parses markdown-formatted tables (| cell | cell | ...)
+    within a block of text, returning them in the same structured row
+    shape extract_structured_tables() produces for native PDF tables —
+    [[header_cells], [row1_cells], [row2_cells], ...] per table — so
+    parse_and_chunk.split_dense_tables() can be reused unchanged on
+    output from either source.
+
+    Built for vision-transcribed pages (Aug 2026, see BACKLOG.md's DEF
+    alarm entry): Claude's vision output naturally includes markdown
+    tables for genuinely tabular content — its own choice when
+    transcribing something structured, never explicitly requested in the
+    vision prompt — confirmed directly by inspecting real production
+    output. This parses that markdown back into structured rows rather
+    than treating vision output as flat, undifferentiated prose, which
+    was the real root cause of a dense multi-code alarm table becoming
+    one large, hard-to-retrieve chunk: its single embedding had to
+    represent eight unrelated alarm codes at once, diluting relevance to
+    a question about any single one."""
+    tables = []
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if line.startswith("|") and line.endswith("|") and len(line) > 1:
+            table_lines = []
+            while i < len(lines):
+                candidate = lines[i].strip()
+                if candidate.startswith("|") and candidate.endswith("|") and len(candidate) > 1:
+                    table_lines.append(candidate)
+                    i += 1
+                else:
+                    break
+            # A real markdown table needs at least a header row and a
+            # separator row (|---|---|...|) right after it — anything
+            # shorter is just a stray line that happens to contain pipe
+            # characters, not an actual table.
+            if len(table_lines) >= 2 and re.match(r"^\|[\s\-:|]+\|$", table_lines[1]):
+                rows = []
+                for tl in [table_lines[0]] + table_lines[2:]:
+                    cells = [c.strip() for c in tl.strip("|").split("|")]
+                    rows.append(cells)
+                if rows:
+                    tables.append(rows)
+        else:
+            i += 1
+    return tables
 
 
 if __name__ == "__main__":

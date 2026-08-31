@@ -40,7 +40,8 @@ from pathlib import Path
 
 import pdfplumber
 
-from parse_and_chunk import chunk_document
+from parse_and_chunk import chunk_document, Chunk, split_dense_tables
+from table_extraction import parse_markdown_tables
 from retrieval import (VoyageEmbedder, get_voyage_key, get_pg_connection,
                         ensure_pg_schema, upsert_chunks, delete_chunks)
 
@@ -347,6 +348,10 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                     del manifest[old_key]
 
             file_chunks = chunk_document(path, metadata)
+            # Needed for vision-derived dense-table sub-chunk IDs below,
+            # matching the exact same convention chunk_document() uses
+            # internally for its own chunk_ids.
+            file_stem = re.sub(r"[^A-Za-z0-9]+", "_", path.stem)
             # Vision-candidate threshold, not just "zero text" (Aug 2026,
             # real gap found via a real production run): a page that's
             # almost entirely a drawing/image can still have a handful of
@@ -418,6 +423,59 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                                 c.has_text_layer = True
                                 text_chunks.append(c)
                             vision_extracted_count += 1
+
+                            # Dense-table splitting for vision-transcribed
+                            # content too (Aug 2026, real fix — see
+                            # BACKLOG.md's DEF alarm entry). Claude's
+                            # vision output naturally includes markdown
+                            # tables for genuinely tabular content — its
+                            # own choice, not something explicitly
+                            # requested in the vision prompt — so the
+                            # same splitting logic already proven for
+                            # native PDF tables can be reused directly
+                            # once that markdown is parsed back into
+                            # structured rows. A whole page's dense
+                            # alarm-code table becoming one
+                            # undifferentiated chunk was the exact root
+                            # cause of a real retrieval miss: its single
+                            # embedding had to represent eight unrelated
+                            # alarm codes at once.
+                            parsed_tables = parse_markdown_tables(transcribed)
+                            if parsed_tables:
+                                extra_texts = split_dense_tables(parsed_tables, page_number)
+                                sample_chunk = chunks_for_page[0]
+                                for table_idx, extra_text in enumerate(extra_texts, start=1):
+                                    new_sub_chunk = Chunk(
+                                        chunk_id=f"{file_stem}-p{page_number}-visiontable{table_idx}",
+                                        text=extra_text,
+                                        vessel=metadata["vessel"],
+                                        order_no=metadata["order_no"],
+                                        equipment_model=metadata["equipment_model"],
+                                        document_type=metadata["document_type"],
+                                        document_title=metadata["document_title"],
+                                        revision=metadata["revision"],
+                                        source_file=path.name,
+                                        page_number=page_number,
+                                        section=sample_chunk.section,
+                                        has_text_layer=True,
+                                        total_pages=sample_chunk.total_pages,
+                                    )
+                                    # Added to BOTH lists (Aug 2026, real
+                                    # bug fix caught in testing) — file_chunks
+                                    # is what actually populates the
+                                    # manifest's tracked chunk_ids and the
+                                    # local chunks.jsonl backup; a sub-chunk
+                                    # only added to text_chunks would get
+                                    # embedded and searchable, but silently
+                                    # untracked — meaning reprocess_file.py
+                                    # would never clean it up on a future
+                                    # re-run, leaving an orphaned chunk
+                                    # behind.
+                                    file_chunks.append(new_sub_chunk)
+                                    text_chunks.append(new_sub_chunk)
+                                if extra_texts:
+                                    print(f"    Page {page_number}: split a dense table into "
+                                          f"{len(extra_texts)} focused sub-chunk(s).")
                     except Exception as e:
                         print(f"    WARNING: vision extraction failed for page "
                               f"{page_number} ({type(e).__name__}: {e}) — this page "
