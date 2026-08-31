@@ -122,6 +122,16 @@ options — the vessel only has one of them installed, so there's no need to \
 ask the user which one unless the registry itself doesn't resolve it (e.g. \
 the equipment isn't in the list at all, or the manual's variants don't map \
 cleanly to what's listed).
+- If a "Document Library" list is provided, it tells you what documents \
+EXIST in the system — use it ONLY to answer questions about existence \
+("is there a schematic for X," "are there more drawings for Y," "what \
+documents do you have about Z"). Never use it to answer what a document's \
+content says — you have no actual content from a document just because \
+its title is in this list. If something relevant exists in the library but \
+you don't have retrieved excerpts from it for this specific question, say \
+plainly that it exists but wasn't retrieved for this question, and suggest \
+asking about it more specifically — never describe or infer its content \
+from the title alone.
 - If an "Engineer Notes" section is provided, treat it as real crew \
 experience, NOT manufacturer data. Its exact, verbatim text is ALWAYS \
 shown to the reader separately, before your answer — you do not need to, \
@@ -248,7 +258,8 @@ def add_exact_code_matches(question: str, chunks: list[dict]) -> list[dict]:
 
 
 def build_prompt(question: str, chunks: list[dict], equipment_context: str = "",
-                  previous_exchange: dict | None = None, notes_context: str = "") -> str:
+                  previous_exchange: dict | None = None, notes_context: str = "",
+                  inventory_context: str = "") -> str:
     excerpt_blocks = []
     for i, c in enumerate(chunks):
         citation = f'{c["metadata"]["document_title"]}, {c["metadata"]["revision"]}, p. {c["metadata"]["page_number"]}'
@@ -256,6 +267,7 @@ def build_prompt(question: str, chunks: list[dict], equipment_context: str = "",
     excerpts = "\n\n".join(excerpt_blocks)
     equipment_block = f"\n{equipment_context}\n" if equipment_context else ""
     notes_block = f"\n{notes_context}\n" if notes_context else ""
+    inventory_block = f"\n{inventory_context}\n" if inventory_context else ""
 
     history_block = ""
     if previous_exchange:
@@ -267,7 +279,7 @@ You answered: "{previous_exchange['answer']}"
 """
 
     return f"""Question: {question}
-{equipment_block}{notes_block}{history_block}
+{equipment_block}{notes_block}{inventory_block}{history_block}
 Manual excerpts retrieved for this question:
 
 {excerpts}
@@ -362,7 +374,18 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
     except Exception:
         pass  # same reasoning as equipment_context — never a reason a question fails
 
-    prompt = build_prompt(question, chunks, equipment_context, previous_exchange, notes_context)
+    inventory_context = ""
+    try:
+        from retrieval import get_pg_connection
+        from document_inventory import get_document_inventory, format_document_inventory
+        inv_conn = get_pg_connection()
+        inventory_context = format_document_inventory(get_document_inventory(inv_conn))
+        inv_conn.close()
+    except Exception:
+        pass  # same reasoning as equipment_context — never a reason a question fails
+
+    prompt = build_prompt(question, chunks, equipment_context, previous_exchange,
+                           notes_context, inventory_context)
 
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
@@ -468,7 +491,17 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
             notes_conn.close()
         except Exception:
             pass
-        prompt = build_prompt(question, chunks, equipment_context, previous_exchange, notes_context)
+        inventory_context = ""
+        try:
+            from retrieval import get_pg_connection
+            from document_inventory import get_document_inventory, format_document_inventory
+            inv_conn = get_pg_connection()
+            inventory_context = format_document_inventory(get_document_inventory(inv_conn))
+            inv_conn.close()
+        except Exception:
+            pass
+        prompt = build_prompt(question, chunks, equipment_context, previous_exchange,
+                               notes_context, inventory_context)
         print("=== SYSTEM PROMPT ===")
         print(SYSTEM_PROMPT)
         if search_query != question:
