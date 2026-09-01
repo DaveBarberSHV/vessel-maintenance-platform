@@ -7,3 +7,4 @@ chromadb
 voyageai
 anthropic
 psycopg2-binary
+bcrypt

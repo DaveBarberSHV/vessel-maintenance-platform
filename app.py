@@ -37,6 +37,7 @@ for key_name in ("VOYAGE_API_KEY", "ANTHROPIC_API_KEY", "SUPABASE_DB_URL"):
 
 from answer_query import get_answer, format_sources  # noqa: E402
 import db  # noqa: E402
+import auth  # noqa: E402
 import engineer_notes  # noqa: E402
 
 st.set_page_config(page_title="Fathom - Polaris", page_icon="⚓")
@@ -95,6 +96,7 @@ def get_db_connection():
     conn = db.get_connection()
     db.ensure_schema(conn)
     engineer_notes.ensure_notes_schema(conn)
+    auth.ensure_users_schema(conn)
     return conn
 
 
@@ -138,26 +140,52 @@ if not db_available:
         "You can still ask questions — answers just won't be saved."
     )
 
-# --- Simple user identification (not real auth — see docs/architecture.md) ---
+# --- Real authentication (Aug 2026) — replaces the original free-text
+# "Who's asking?" field. See auth.py for the full design rationale: the
+# free-text version meant Engineer Notes' authorization
+# (AUTHORIZED_NOTE_AUTHORS) was only ever checking a typed name, not a
+# verified identity — anyone with the app URL could type "Jared" and
+# submit a note carrying his real operational authority. No self-service
+# signup, no password-reset flow — accounts are provisioned manually via
+# manage_users.py, matching how AUTHORIZED_NOTE_AUTHORS is already a
+# small, manually-maintained list.
 if "user_name" not in st.session_state:
     st.session_state.user_name = None
 
-with st.sidebar:
-    st.subheader("Who's asking?")
-    name_input = st.text_input(
-        "Name", value=st.session_state.user_name or "",
-        placeholder="Type your name...",
-        label_visibility="collapsed",
-    )
-    # Free-text (Aug 2026) — was a fixed Dave/Jared dropdown, which blocked
-    # everyone else on the crew from using the app at all. Light
-    # normalization (trim + title-case) so "jared" / "Jared" / "JARED"
-    # from different visits still group together under one consistent
-    # name for "Past conversations" and feedback — matching is an exact
-    # string comparison at the database level, not case-insensitive.
-    st.session_state.user_name = name_input.strip().title() or None
+if not st.session_state.user_name:
+    st.info("👋 Please log in to continue.")
+    with st.form("login_form"):
+        username_input = st.text_input("Username")
+        password_input = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Log In")
+        if submitted:
+            if not db_available:
+                st.error(f"Login isn't available right now ({db_error}).")
+            elif not username_input.strip() or not password_input:
+                st.warning("Please enter both a username and password.")
+            else:
+                try:
+                    success, message = with_connection_retry(
+                        auth.verify_credentials, username_input.strip(), password_input)
+                    if success:
+                        st.session_state.user_name = auth.normalize_username(username_input)
+                        st.rerun()
+                    else:
+                        st.error(message)
+                except Exception as e:
+                    st.error(f"Couldn't verify login right now ({e}).")
+    st.stop()
 
-    if st.session_state.user_name and db_available:
+with st.sidebar:
+    st.write(f"Logged in as **{st.session_state.user_name}**")
+    if st.button("Log out"):
+        st.session_state.user_name = None
+        st.session_state.messages = []
+        if "conversation_id" in st.session_state:
+            del st.session_state["conversation_id"]
+        st.rerun()
+
+    if db_available:
         st.divider()
         if st.button("+ New conversation", use_container_width=True):
             st.session_state.conversation_id = db.new_conversation_id()
@@ -179,7 +207,9 @@ with st.sidebar:
         # itself is only shown to people on that list at all, rather than
         # shown to everyone and blocked with an error. See
         # engineer_notes.AUTHORIZED_NOTE_AUTHORS to add someone (e.g. a
-        # newly delegated Chief Engineer).
+        # newly delegated Chief Engineer). Now backed by real login (Aug
+        # 2026) rather than a typed name, so this check is a genuine
+        # authorization check, not just a display filter.
         author_role = engineer_notes.AUTHORIZED_NOTE_AUTHORS.get(st.session_state.user_name)
         if author_role:
             with st.popover("📝 + Engineer Note", use_container_width=True):
@@ -244,10 +274,6 @@ with st.sidebar:
                     st.session_state.messages = with_connection_retry(
                         db.load_conversation, str(convo["conversation_id"]))
                     st.rerun()
-
-if not st.session_state.user_name:
-    st.info("👋 Select your name in the sidebar to get started.")
-    st.stop()
 
 if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = db.new_conversation_id() if db_available else "local-only"
