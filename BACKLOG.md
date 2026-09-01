@@ -5,6 +5,34 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## 🔺 Real security audit log — committed, 30-day target (Sept 2026)
+
+**What:** A dedicated app-level security event log — distinct from the
+existing chat history, which logs conversation activity for a different
+purpose. Real events to capture, at minimum: successful and failed
+login attempts, account creation/removal, and Engineer Note submissions
+(who, what, when, outcome).
+
+**Why:** Surfaced directly during the NIST SP 800-171 Rev 3 review (see
+`nist_800-171_rev3_tracker.xlsx`) — the whole Audit and Accountability
+control family (8 controls) depends on this existing, and currently
+doesn't. Real, incidental activity logging exists (the `messages`
+table), but nothing deliberately tracks security-relevant events the
+way this control family expects. A quick check confirmed this isn't
+something the database provider's own tooling can substitute for —
+that would cover database-level access to Supabase itself, not events
+inside our own login system (`auth.py`), which is entirely our own code
+checking our own `users` table.
+
+**Real, buildable scope, reusing established patterns:** a new table,
+built the same way `auth.py`'s `users` table already is — no new
+architecture needed, just applying the existing pattern to a new kind
+of event.
+
+**Committed target: 30 days from Sept 2026.**
+
+---
+
 ## 🔺 Real architecture decision, not yet made — single-instance-per-vessel vs. shared multi-tenant
 
 **What:** How the system should be architected once a second vessel (or
