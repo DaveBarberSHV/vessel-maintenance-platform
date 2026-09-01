@@ -5,6 +5,124 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## 🔺 Real architecture decision, not yet made — single-instance-per-vessel vs. shared multi-tenant
+
+**What:** How the system should be architected once a second vessel (or
+a second customer) is actually on the horizon. Surfaced Sept 2026 while
+discussing the full-manual download feature (below) — Jared's company
+alone owns 50+ vessels, and most real ship owners likely operate more
+than one, so this isn't a hypothetical, just not urgent yet. See
+`docs/product_vision.md` for the "Their Library" principle this connects
+to directly.
+
+**Current state:** the system is architected single-vessel today — a
+hardcoded `VESSEL` constant in `ingestion/scan_folder.py`. The natural,
+obvious next step for a new vessel, with zero changes, is a fully
+separate deployment.
+
+**Option A — separate instance per vessel.** Each vessel gets its own
+database, its own app deployment, zero shared infrastructure. Dave's
+initial instinct, and genuinely fine architecturally.
+- Real cost at real scale, honestly stated: 50+ vessels for *one*
+  customer means 50+ separate databases and deployments to maintain —
+  every future fix (the exact-code search fix, dense-table splitting,
+  the unit-conversion correction, all real examples from this project)
+  needs to be manually pushed to every single instance, individually,
+  forever. This is a real, compounding operational burden that grows
+  with every vessel and every customer.
+- Forecloses fleet-level features (e.g. "three other vessels in your
+  fleet have logged this same alarm pattern") without a full
+  rearchitecture later — Dave has already expressed real interest in
+  this kind of connection down the line.
+
+**Option B — one shared system, real per-vessel data isolation.** One
+deployment serves every vessel; every piece of data is tagged to its
+owning vessel; every database query in the entire codebase is enforced
+to only ever touch that vessel's own data. The standard real-world
+pattern for multi-tenant SaaS.
+- Real benefit: one system to maintain, one place to ship a fix, scales
+  to any number of vessels or customers without new infrastructure per
+  vessel. Leaves the door open for real fleet-level features later,
+  built deliberately and with an owner's explicit consent.
+- Real cost, stated plainly: this is serious engineering to get right —
+  every query, everywhere, forever, needs correct vessel-scoping. A bug
+  here isn't cosmetic; it's the difference between working correctly and
+  one customer's proprietary technical manuals or Engineer Notes leaking
+  into another customer's answers. This is about as serious as a
+  security bug gets, and it's very close to the first question a real
+  multi-customer security review (see the planned NIST controls
+  discussion) would ask: how is customer data guaranteed to never cross
+  tenant boundaries.
+
+**Deliberately not decided now.** Both options are real and viable; this
+is a genuine decision to make deliberately, with the full tradeoff in
+view, once a second vessel or customer is actually imminent — not
+something to default into just because Option A came up first in
+conversation, and not something to force a decision on prematurely
+either.
+
+---
+
+## 🔲 Full-manual download — a real, direct expression of "their library"
+
+**What:** Alongside the existing per-page citation and page image
+already shown with an answer, add a way to download the *entire* source
+manual — a real, concrete expression of the library principle in
+`docs/product_vision.md`: real, complete access to what's in the
+library, not just fragments surfaced in an answer. Dave's own framing:
+a button next to the source page button, specifically for the whole
+manual.
+
+**Real infrastructure gap, not yet solved:** the original source PDF
+isn't stored anywhere the deployed app can currently reach. Ingestion
+extracts text and renders *selected* page images to Supabase Storage —
+the complete original file itself is never uploaded anywhere beyond
+Dave's own computer and Google Drive. Building this means uploading the
+complete original PDF to Storage during ingestion too, alongside what
+already happens for page images.
+
+**Real UX requirement, Dave's own design, already well-specified:** a
+bandwidth-aware warning before a large file downloads — something like
+*"You have requested a manual which is XX MB. This large file may not
+be quickly available unless you have a strong WiFi signal. Do you want
+to proceed?"* — directly motivated by real Starlink/at-sea connectivity
+concerns already discussed earlier in this project (see the "keep the
+system fast" conversation from the vision-extraction work).
+
+**Not yet built.** Real, valuable, clearly scoped — a genuine feature,
+not a huge lift, but a real one: upload full PDFs during ingestion, add
+a UI element near the existing source citations, and a real,
+file-size-aware confirmation step before a large download starts.
+
+---
+
+## 🔲 Email-based document ingestion — future vision, not to be built yet
+
+**What:** Dave's real, longer-term vision for making it dramatically
+easier for a vessel owner to keep their library current, since most new
+documents will realistically arrive by email — see
+`docs/administrator_guide.md` for how much real, manual friction exists
+in today's workflow (Jared uploads → Dave notices → Dave renames →
+Dave ingests).
+
+**Envisioned workflow, as described:**
+1. Documents arrive at a dedicated email address/inbox tied to the
+   system.
+2. An automatic scan captures real metadata directly from the file:
+   size, page count, date, full title, original filename.
+3. The system suggests a filename following the existing naming
+   convention (see `docs/administrator_guide.md`), based on its best
+   guess at `System` and `DocType`.
+4. An administrator (Dave, or whoever holds that role later) reviews and
+   approves — or corrects — the suggested name before it goes live (e.g.
+   if the system guessed the wrong `System` or `DocType`).
+
+**Explicitly not to be built now** — Dave's own call. Captured precisely
+here so the real design thinking survives intact until it's actually
+time to build it, rather than needing to be reconstructed from memory.
+
+---
+
 ## ✅ First real review of accumulated 👍/👎 feedback (Aug 2026) — 2 real bugs found, 1 open question
 
 **What:** The first genuine review of real feedback data since the
