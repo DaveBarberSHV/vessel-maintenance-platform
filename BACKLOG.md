@@ -398,7 +398,7 @@ answer itself, rather than requiring an extra click to find it?
 
 ---
 
-## Anticipated scaling issue — equipment dropdown will get unwieldy beyond drivetrain
+## ✅ TRIGGERED — equipment dropdown scaling, now a real, active item for tomorrow (Sept 2026)
 
 **What:** Both the Engineer Notes equipment dropdown and the equipment
 registry itself currently show a flat list of entries (~10 today, all
@@ -428,17 +428,39 @@ once other systems are added.
   visually (a labeled section per system) or become a two-step picker
   (choose system, then equipment within it) — either is a real
   improvement over one long flat list.
-- **Real wrinkle to solve alongside this:** the current equipment-list
-  extraction assumes the whole document is one system (it's literally
-  named `Drivetrain_Vessel_AllModels_EquipmentList...`) — this isn't
-  really something to infer from a document's content; a future HVAC
-  equipment list would need to explicitly declare its system too, the
-  same way the naming convention already does for every other document
-  type, rather than trying to have extraction guess it.
+- **Real wrinkle, now more complex than originally anticipated:** the
+  original version of this entry assumed a *future* single-system list
+  (e.g. a whole HVAC equipment list). What actually arrived (Sept 2026)
+  is a single document spanning *multiple* systems at once — drivetrain
+  plus fire pumps, air compressors, crane, and water pumps together.
+  Extraction can't infer per-item system from a document title the way
+  it does today; the real fix needs to identify or tag each equipment
+  item's own system individually, not just the document's.
 
-**Trigger to revisit:** when a second system's equipment list is about
-to be ingested (not urgent before then) — no need to build this ahead of
-having a second real system's data to test it against.
+**Trigger condition met (Sept 2026):** a real, second equipment list —
+covering multiple non-drivetrain systems at once — is ready to be
+ingested. Real, concrete documents driving this:
+- A new vessel-wide equipment list (drivetrain + fire pumps, air
+  compressors, crane, water pumps) — see naming guidance below.
+- A new MainSwitchboard Distribution Panel wiring diagram.
+- Two new folders Jared created (MainSwitchboard Distribution Panel TMs,
+  Genset TMs) currently sitting *inside* Drivetrain TMs, though neither
+  is drivetrain-related.
+
+**Real naming guidance agreed for these specific documents:**
+- The vessel-wide equipment list: `AllSystems_Vessel_AllModels_EquipmentList_Rev[X].pdf`
+- The switchboard wiring diagram: `MainSwitchboard_[Manufacturer]_[Model]_WiringDiagram_Rev[X].pdf`
+
+**Real folder fix agreed, not yet done:** move both new folders out to
+become *siblings* of Drivetrain TMs (directly under "Vessel Maintenance
+System Documents"), not children of it. No technical ingestion problem
+either way — `scan_folder.py` scans recursively regardless of nesting —
+but once moved, the ingestion command needs to point at the parent
+folder instead of "Drivetrain TMs" specifically, to pick up every
+system's folder in one recursive scan.
+
+**Committed: fix the structural gap and move the folders tomorrow, then
+ingest.**
 
 **Related, one level down (Aug 2026):** the same shape of problem is
 starting on the *subsystem* level, not just across systems. Raised
