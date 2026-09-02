@@ -107,6 +107,10 @@ def ensure_equipment_schema(conn):
                 UNIQUE (category, position)
             );
         """)
+        # RLS enabled directly here, not left as a separate manual step
+        # (Sept 2026, real incident) — see auth.py's ensure_users_schema()
+        # docstring for the full explanation. Safe to call repeatedly.
+        cur.execute("ALTER TABLE vessel_equipment ENABLE ROW LEVEL SECURITY;")
     conn.commit()
 
 

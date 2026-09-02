@@ -196,6 +196,11 @@ def ensure_pg_schema(conn):
         # simple, correct, and fast enough. Revisit only if query latency
         # actually becomes a real problem — premature indexing here would
         # trade simplicity for a speed nobody's asked for yet.
+
+        # RLS enabled directly here, not left as a separate manual step
+        # (Sept 2026, real incident) — see auth.py's ensure_users_schema()
+        # docstring for the full explanation. Safe to call repeatedly.
+        cur.execute(f"ALTER TABLE {PG_TABLE} ENABLE ROW LEVEL SECURITY;")
     conn.commit()
 
 

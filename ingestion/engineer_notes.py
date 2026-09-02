@@ -64,6 +64,10 @@ def ensure_notes_schema(conn):
             ALTER TABLE engineer_notes
                 ADD COLUMN IF NOT EXISTS author_role TEXT;
         """)
+        # RLS enabled directly here, not left as a separate manual step
+        # (Sept 2026, real incident) — see auth.py's ensure_users_schema()
+        # docstring for the full explanation. Safe to call repeatedly.
+        cur.execute("ALTER TABLE engineer_notes ENABLE ROW LEVEL SECURITY;")
     conn.commit()
 
 

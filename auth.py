@@ -48,6 +48,19 @@ MIN_PASSWORD_LENGTH = 8
 
 
 def ensure_users_schema(conn):
+    """RLS enabled directly here, not left as a separate manual step (Sept
+    2026, real incident) — a real Supabase security alert found this
+    table (and 4 others) publicly readable/writable through Supabase's
+    auto-generated public REST API, since RLS defaults to disabled on any
+    new Postgres table. Baking ENABLE ROW LEVEL SECURITY into the same
+    function that creates the table means every future table created the
+    same way is protected automatically, the moment it's created — not
+    dependent on anyone remembering a separate step. Safe to call
+    repeatedly: enabling RLS on an already-enabled table is a harmless
+    no-op, same as CREATE TABLE IF NOT EXISTS. This does NOT affect our
+    own app's direct database connection, which authenticates as the
+    table owner and bypasses RLS by default — only the separate,
+    publicly-reachable REST API path is blocked."""
     with conn.cursor() as cur:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -58,6 +71,7 @@ def ensure_users_schema(conn):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
         """)
+        cur.execute("ALTER TABLE users ENABLE ROW LEVEL SECURITY;")
     conn.commit()
 
 

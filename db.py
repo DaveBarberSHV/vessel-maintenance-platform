@@ -103,6 +103,10 @@ def ensure_schema(conn):
             ALTER TABLE messages
                 ADD COLUMN IF NOT EXISTS field_notes_used JSONB;
         """)
+        # RLS enabled directly here, not left as a separate manual step
+        # (Sept 2026, real incident) — see auth.py's ensure_users_schema()
+        # docstring for the full explanation. Safe to call repeatedly.
+        cur.execute("ALTER TABLE messages ENABLE ROW LEVEL SECURITY;")
     conn.commit()
 
 
