@@ -172,6 +172,21 @@ Dave ingests).
 here so the real design thinking survives intact until it's actually
 time to build it, rather than needing to be reconstructed from memory.
 
+**Real connection surfaced during the NIST review (Sept 2026):** this
+isn't just a workflow convenience — it's also the real answer to a
+genuine security-boundary question. Today, source PDFs stage in a
+personal Google Drive account before ingestion, which is low real risk
+right now (known, trusted people) but doesn't match the "Their Library"
+trust commitment (`docs/product_vision.md`) once real customers are
+involved — a customer's proprietary manuals sitting in an individual's
+personal cloud account isn't the right long-term posture, independent
+of how trustworthy that individual is. This also connects directly to
+the multi-vessel architecture decision above — a single shared personal
+Drive account clearly doesn't work once more than one customer's data
+needs to stay genuinely separate. All three items are really facets of
+one future decision: how a new document gets from "just arrived" to
+safely inside Fathom's own real, controlled system boundary.
+
 ---
 
 ## ✅ First real review of accumulated 👍/👎 feedback (Aug 2026) — 2 real bugs found, 1 open question
