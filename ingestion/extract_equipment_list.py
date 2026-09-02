@@ -140,7 +140,19 @@ def upsert_equipment(conn, entries: list[dict], source_document: str):
                 updated_at = now()
             """,
             rows,
-            template="(%s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
+            # 9 placeholders, matching the 9-value row tuple above
+            # exactly (system, category, position, manufacturer, model,
+            # serial_number, specs, notes, source_document). Real bug
+            # fixed here (Sept 2026, found via a real live ingestion
+            # run): this template still had only 8 placeholders after
+            # `system` was added as a new first column — the column
+            # list and the row tuple were both updated correctly, but
+            # this template wasn't, silently misaligning every row's
+            # values against the wrong columns and producing a
+            # confusing, unrelated-looking "no unique constraint
+            # matching ON CONFLICT" error rather than an obvious count
+            # mismatch.
+            template="(%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
         )
     conn.commit()
 
