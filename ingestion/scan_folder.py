@@ -72,6 +72,32 @@ DOCTYPE_LABELS = {
 }
 
 
+# Extremely common short English words — genuine prose of any real
+# length almost always contains several of these; garbled/reversed text
+# essentially never does (Sept 2026, real bug found live — a reversed
+# AutoCAD title-block stamp cleared the length threshold below with zero
+# real content, since reversing "the" produces "eht," matching nothing
+# on this list). Deliberately just the handful of words common enough
+# that ANY real paragraph-length English text should contain a few —
+# not a full stopword list, which would be slower to check for no real
+# benefit here.
+COMMON_ENGLISH_WORDS = {"the", "and", "of", "to", "in", "for", "on", "is", "with", "at"}
+
+
+def is_real_language(text: str) -> bool:
+    """True if text plausibly contains genuine English prose, not just
+    a long string of characters. Real motivating case: a page's native
+    text was a rotated title-block stamp extracted with every character
+    reversed — long enough to clear the length threshold, semantically
+    meaningless to any embedding model. A short title/label with no
+    prose at all (e.g. just a drawing number) is expected to fail this
+    check too — that's fine, since such a page is short enough to be
+    caught by the length threshold anyway; this check only matters for
+    the case a page is long AND garbled, not long and just terse."""
+    words = set(w.strip(".,;:()[]\"'").lower() for w in text.split())
+    return len(words & COMMON_ENGLISH_WORDS) >= 2
+
+
 def validate_pdf(path: Path) -> tuple[bool, str | None]:
     """Sanity-check a file before processing. Returns (is_valid, issue).
     A file that fails this should be reported clearly and skipped —
@@ -368,8 +394,28 @@ def scan_folder(folder: Path, engine: str = "voyage"):
             # generous (not just "more than a few words") since it's far
             # better to run one unnecessary vision call on a border-case
             # page than to silently under-detect a real drawing again.
+            #
+            # Length alone isn't enough, though (Sept 2026, real bug
+            # found live): a boarding-ladders drawing had a rotated
+            # AutoCAD title-block stamp extracted with every character
+            # reversed ("R:\GC\Jobs..." became "...sboJ\GC\:R") — genuine
+            # garbage to any embedding model, but combined with a
+            # spurious empty table pdfplumber mistook for real content
+            # (just the drawing's own border gridlines), it happened to
+            # clear the length threshold anyway. That page never even
+            # became a vision candidate, so the drawing's real content
+            # was never captured by anything at all — not a ranking
+            # problem like earlier retrieval issues, the content was
+            # simply never in the system. is_real_language() below
+            # catches this: reversed or otherwise garbled text has
+            # essentially none of the extremely common short words real
+            # English prose always has ("the," "and," "of," "to").
             VISION_CANDIDATE_CHAR_THRESHOLD = 200
-            text_chunks = [c for c in file_chunks if len(c.text.strip()) >= VISION_CANDIDATE_CHAR_THRESHOLD]
+            text_chunks = [
+                c for c in file_chunks
+                if len(c.text.strip()) >= VISION_CANDIDATE_CHAR_THRESHOLD
+                and is_real_language(c.text)
+            ]
             no_text_chunks = [c for c in file_chunks if c not in text_chunks]
 
             # Vision extraction for pages with no text layer (Aug 2026) —
