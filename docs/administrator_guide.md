@@ -230,3 +230,51 @@ than guessing in the moment:
 
 See `docs/architecture.md`'s "Diagnostic tooling" section for the full
 list of tools like these and what each is for.
+
+---
+
+## 9. User account management — termination and transfer
+
+This guide has been about documents so far — this section covers real
+people's access to the system itself (Sept 2026, prompted directly by
+the NIST SP 800-171 review — see `nist_800-171_rev3_tracker.xlsx`,
+control 03.09.02).
+
+**Real commitment: revoke access immediately upon becoming aware of a
+termination or departure — not on a schedule, not batched, the moment
+you know.**
+
+### When someone leaves entirely
+
+```bash
+python3.14 manage_users.py remove <username>
+```
+
+This immediately and completely revokes their login — the account is
+deleted outright, not just disabled. There's no way to log in with it
+afterward, and no separate step needed.
+
+If they were also an authorized Engineer Notes author, also remove them
+from `AUTHORIZED_NOTE_AUTHORS` in `ingestion/engineer_notes.py` and
+redeploy — otherwise their name would still show up as a recognized
+author for any future note (though they'd have no way to actually
+submit one, since their login is already gone).
+
+### When someone's role changes (not leaving, but their authority should)
+
+- If their Engineer Notes authorization should change — gaining or
+  losing it — update `AUTHORIZED_NOTE_AUTHORS` in
+  `ingestion/engineer_notes.py` accordingly and redeploy.
+- Their login access itself doesn't need any change unless the role
+  change also warrants removing them entirely.
+
+### A new person joining
+
+```bash
+python3.14 manage_users.py add <username>
+```
+
+See `manage_users.py`'s own usage notes for the full flow (password
+entered hidden, confirmed twice, never passed as a command-line
+argument).
+
