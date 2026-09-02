@@ -5,6 +5,29 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## 🔺 Multi-Factor Authentication — committed before first full-scale deployment (Sept 2026)
+
+**What:** Today's login (`auth.py`) is password-only, single-factor.
+MFA (e.g. a time-based one-time code, matching standard practice) would
+add a real second factor beyond the password itself.
+
+**Why:** Surfaced directly during the NIST SP 800-171 Rev 3 review (see
+`nist_800-171_rev3_tracker.xlsx`, control 03.05.03) — flagged as one of
+the more meaningful real gaps found in the whole review so far, not a
+minor checklist item.
+
+**Dave's real, explicit commitment (Sept 2026):** MFA will be
+implemented **prior to the first full-scale deployment, possibly
+sooner** — not deferred indefinitely. As the system opens to wider use
+beyond the current two known users, exactly *when* to implement it
+should be a **deliberate decision point**, not something that happens
+by default or gets forgotten in the rush to onboard more people.
+
+**Not yet built** — captured precisely now so the real commitment and
+its reasoning survive intact until it's time to build it.
+
+---
+
 ## 🔺 Real security audit log — committed, 30-day target (Sept 2026)
 
 **What:** A dedicated app-level security event log — distinct from the
