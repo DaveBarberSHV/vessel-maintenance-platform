@@ -5,6 +5,83 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## 🔺 is_real_language() likely over-triggers on legitimate technical content — needs real calibration
+
+**What:** The garbled-text fix built the same day (see the
+`is_real_language()` entry — search `scan_folder.py`) checks for common
+English filler words ("the," "and," "of") to catch reversed/garbled
+native text. Built and proven correct against the one real case that
+motivated it (a reversed AutoCAD title-block stamp). **Not yet proven
+safe at scale.**
+
+**Real, concerning finding the same day:** running `audit_garbled_text.py`
+against the entire real library flagged **27 files** — including real,
+known-good OMM manuals, parts lists, and service reports already
+successfully used to answer real questions earlier the same day. That
+volume and content mix is far more consistent with a **false-positive
+problem in the check itself** than with 27 genuinely broken documents.
+**Real, honest hypothesis, not yet confirmed:** dense technical
+content — parts lists, spec tables, diagnostic codes — is naturally
+sparse in common English filler words simply because it's mostly part
+numbers and model designations, which could trigger the same signature
+as genuinely garbled text without actually being broken.
+
+**Explicitly not acted on the same day** — reprocessing any of those 27
+files would mean real API cost and, worse, potentially replacing
+genuinely good native text with a worse AI reinterpretation for
+documents that were never actually broken. Too risky to run without
+understanding the false-positive rate first.
+
+**Real next step, not yet done:** manually inspect a genuine sample of
+the 27 flagged files (`inspect_page.py`) to determine how many are
+truly garbled versus legitimately terse, dense, real content. Then
+either raise the common-word threshold, exempt certain document types
+(parts lists, spec tables) from this check, or find a more precise
+signal that doesn't confuse "genuinely reversed" with "genuinely
+technical." The one real, confirmed case (boarding ladders) is not at
+risk — already fixed and verified independently of this open question.
+
+---
+
+## 🔺 Large-format drawing resolution — real, live example found the same day
+
+**What:** Already a known, deliberately deferred limitation (see the
+vision-extraction entry earlier in this file): Claude's vision API caps
+any image dimension at 8000px, forcing a real trade-off on large
+engineering sheets between fitting the whole drawing in one image versus
+reading its fine print clearly. The real fix (tiling a large page into
+higher-resolution sections) was scoped but not built, given the cost of
+extra API calls per large drawing.
+
+**Real, live example found the same day:** a real question asked about
+a specific piece of equipment visibly labeled "Harrington Hand Chain
+Hoist" directly on `Hull_MBB_S71CouplerRoomTrolleySystem_DWG_Rev0.pdf` —
+confirmed legible to the human eye on the actual drawing. The vision
+transcription for this page captured substantial real content
+(dimensions, section views, general labels like "CHAINFALL," "HOIST
+BEAM") but never the specific brand name "Harrington" — consistent with
+fine, small-print detail not surviving at the resolution this
+large-format sheet was rendered at, the exact trade-off this limitation
+predicts. Several `*(illegible)*` markers already present in the
+transcription itself are further, direct evidence of the same
+resolution constraint at work on this specific file.
+
+**Real, separate, smaller oddity noticed while investigating:** this
+page has two dense-table sub-chunks
+(`-p1-densetable1`, `-p1-densetable2`) with completely identical
+content — likely two dense tables detected on the same page each
+producing a full-page transcription redundantly, rather than being
+partitioned as intended. Not harmful (no wrong information), just
+wasteful (duplicate storage/embedding). Worth a look alongside the
+tiling fix, not urgent on its own.
+
+**Still not built** — same real, honest cost/value tradeoff as before:
+worth doing, but deliberately not rushed at the end of a long session.
+Real, concrete evidence now exists (this file, this exact question) to
+use as the test case whenever this gets picked up.
+
+---
+
 ## 🔺 MFA on key service/admin accounts — real, immediate action for Dave (Sept 2026)
 
 **What:** Enabling multi-factor authentication on the *administrative*
