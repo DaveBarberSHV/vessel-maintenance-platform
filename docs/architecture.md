@@ -14,16 +14,17 @@ not an abstract ideal written beforehand. Applies to every future
 decision in this document, not just the sections below.
 
 **What actually happened, honestly stated:** two real gaps existed
-undetected for months — every database table was publicly reachable
-through Supabase's auto-generated REST API (RLS was never enabled), and
-the database connection was silently unencrypted despite the server
-supporting SSL. Both were found only because an external alert caught
-them, not because anything in how they were built had proactively
-considered the question. That's the real failure worth learning from —
-not the specific bugs, but that application-layer thinking (password
-hashing, server-side authorization checks) was genuinely careful, while
-platform-specific risk — what does *this specific vendor*, by default,
-expose or fail to enforce — was never actively asked.
+undetected since this project began (about 2.5 weeks) — every database
+table was publicly reachable through Supabase's auto-generated REST API
+(RLS was never enabled), and the database connection was silently
+unencrypted despite the server supporting SSL. Both were found only
+because an external alert caught them, not because anything in how they
+were built had proactively considered the question. That's the real
+failure worth learning from — not the specific bugs, but that
+application-layer thinking (password hashing, server-side authorization
+checks) was genuinely careful, while platform-specific risk — what does
+*this specific vendor*, by default, expose or fail to enforce — was
+never actively asked.
 
 **The real, standing rule going forward:** before considering any new
 table, integration, or feature done, explicitly answer four questions —
@@ -42,11 +43,13 @@ not as a retrospective audit, but as a normal part of building it:
    here too — a security assumption deserves the same rigor as a claim
    about whether a feature works.
 
-**Also worth naming directly:** this review itself — a full pass through
-NIST SP 800-171 Rev 3 (`nist_800-171_rev3_tracker.xlsx`), now committed
-to quarterly (`docs/administrator_guide.md`, Section 10) — exists
-because reactive discovery isn't good enough on its own. Proactive
-review is the complement to careful building, not a replacement for it.
+**Standing instruction:** every future architecture decision and code
+change must be considered against the real controls in NIST SP 800-171
+Rev 3 (`nist_800-171_rev3_tracker.xlsx`), not just the four questions
+above in the abstract. This gets reviewed quarterly
+(`docs/administrator_guide.md`, Section 10) to confirm the system's
+actual security posture stays aligned with the framework — not just at
+the moment of this first pass.
 
 ## Ingestion (getting TMs into the system)
 
