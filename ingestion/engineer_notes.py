@@ -165,11 +165,18 @@ def format_notes_for_prompt(notes: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def get_equipment_options(conn) -> list[tuple[str, str | None]]:
-    """Returns (category, position) pairs for the notes dropdown — reuses
-    the real installed-equipment registry rather than a separate list,
-    plus a General/Other option for anything that doesn't map cleanly to
-    one specific item.
+def get_equipment_options(conn) -> list[tuple[str, str, str | None]]:
+    """Returns (system, category, position) triples for the notes
+    dropdown — reuses the real installed-equipment registry rather than
+    a separate list, plus a General/Other option for anything that
+    doesn't map cleanly to one specific item.
+
+    system added (Sept 2026, real trigger — see BACKLOG.md's equipment
+    dropdown scaling entry): a vessel-wide equipment list spanning
+    multiple systems at once is being ingested for the first time, and
+    the dropdown needs the system to stay organized/scannable as more
+    systems beyond drivetrain get added, not just show one long flat
+    list.
 
     Queries the database directly rather than calling
     extract_equipment_list.get_equipment_list() (Aug 2026, real bug fix):
@@ -185,7 +192,7 @@ def get_equipment_options(conn) -> list[tuple[str, str | None]]:
     the final fallback if a fresh connection genuinely doesn't help
     either."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute("SELECT category, position FROM vessel_equipment ORDER BY category, position")
-        options = [(r["category"], r["position"]) for r in cur.fetchall()]
-    options.append((GENERAL_CATEGORY, None))
+        cur.execute("SELECT system, category, position FROM vessel_equipment ORDER BY system, category, position")
+        options = [(r["system"], r["category"], r["position"]) for r in cur.fetchall()]
+    options.append(("General", GENERAL_CATEGORY, None))
     return options

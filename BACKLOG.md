@@ -466,69 +466,66 @@ answer itself, rather than requiring an extra click to find it?
 
 ---
 
-## ✅ TRIGGERED — equipment dropdown scaling, now a real, active item for tomorrow (Sept 2026)
+## ✅ RESOLVED — equipment dropdown scaling, built and proven working (Sept 2026)
 
-**What:** Both the Engineer Notes equipment dropdown and the equipment
-registry itself currently show a flat list of entries (~10 today, all
-implicitly drivetrain since that's all that's been ingested). Raised
-proactively by Dave (Aug 2026), before it's actually a problem: once
-HVAC, electrical, fire suppression, steering, hydraulics, etc. get added
-— the original full vision for this system, per README — that flat list
-could grow to 50-100+ entries, genuinely hard to navigate.
+**What it was:** Both the Engineer Notes equipment dropdown and the
+equipment registry itself showed a flat list of entries (~10, all
+implicitly drivetrain since that's all that had been ingested). Raised
+proactively by Dave (Aug 2026), before it was actually a problem: once
+other systems got added, that flat list would grow large and hard to
+navigate.
 
-**What already helps, for free, right now:** Streamlit's `st.selectbox`
-supports typing to filter as you type — someone can type "clutch" and
-jump straight there rather than scrolling a long list. Real headroom
-before this becomes a genuine problem, with zero engineering effort.
+**What got built:**
+- A real `system` column added to `vessel_equipment`, with a genuine
+  migration for the already-existing table (not just a fresh-install
+  assumption).
+- `extract_equipment_list.py`'s extraction prompt updated to identify
+  each equipment item's own real system individually — critical since
+  the real document that arrived (see below) covers multiple systems at
+  once, not one system per document as originally assumed.
+- The equipment context injected into every prompt (`format_equipment_list()`)
+  and the Engineer Notes dropdown (`get_equipment_options()`) both now
+  group by system, not one flat list.
 
-**The real structural gap:** `vessel_equipment` has no concept of which
-*system* a piece of equipment belongs to — "Main Engine," "Azimuth
-Drive," etc. are a flat list, only implicitly drivetrain by virtue of
-nothing else existing yet. Nothing distinguishes them at the data level
-once other systems are added.
+**Real, live proof it works (Sept 2026):** a genuine vessel-wide
+equipment list — 45 real items spanning drivetrain, generators, JAK
+system, fire suppression, fuel/oil, potable water, electrical, and deck
+equipment — was ingested successfully. The registry now correctly shows
+8 real, distinct systems, with the original 10 drivetrain items
+correctly *updated* in place (not duplicated) alongside 35 genuinely new
+items. Final tally matched the extraction count exactly (45), confirming
+the `(system, category, position)` upsert design works as intended.
 
-**Path to fixing it, not yet built:**
-- Add an explicit `system` column to `vessel_equipment`, reusing the
-  exact `[System]` value already baked into the TM naming convention
-  (Drivetrain, HVAC, Electrical, ...) — same vocabulary already doing
-  this job for documents, not a new concept.
-- Once that exists, the dropdown can either group entries by system
-  visually (a labeled section per system) or become a two-step picker
-  (choose system, then equipment within it) — either is a real
-  improvement over one long flat list.
-- **Real wrinkle, now more complex than originally anticipated:** the
-  original version of this entry assumed a *future* single-system list
-  (e.g. a whole HVAC equipment list). What actually arrived (Sept 2026)
-  is a single document spanning *multiple* systems at once — drivetrain
-  plus fire pumps, air compressors, crane, and water pumps together.
-  Extraction can't infer per-item system from a document title the way
-  it does today; the real fix needs to identify or tag each equipment
-  item's own system individually, not just the document's.
+**Two real bugs found and fixed along the way, worth remembering:**
+1. **Token limit too low.** `max_tokens` was sized for the old ~10-item
+   list; the real 45-item vessel-wide list hit it exactly, silently
+   truncating the JSON mid-string and producing a cryptic
+   `JSONDecodeError` ("Unterminated string...") rather than a clear
+   "ran out of room" error. Raised generously (16000) with an explicit
+   `stop_reason == "max_tokens"` check added, so any future truncation
+   fails with a clear, actionable message instead of a confusing one.
+2. **A genuinely intermittent JSON-formatting slip**, confirmed by
+   re-running the identical extraction with zero changes and getting a
+   clean success — not a fixed, reproducible bug tied to one specific
+   piece of content. Fixed with a real retry (up to 3 attempts) rather
+   than chasing a phantom "broken character."
 
-**Trigger condition met (Sept 2026):** a real, second equipment list —
-covering multiple non-drivetrain systems at once — is ready to be
-ingested. Real, concrete documents driving this:
-- A new vessel-wide equipment list (drivetrain + fire pumps, air
-  compressors, crane, water pumps) — see naming guidance below.
-- A new MainSwitchboard Distribution Panel wiring diagram.
-- Two new folders Jared created (MainSwitchboard Distribution Panel TMs,
-  Genset TMs) currently sitting *inside* Drivetrain TMs, though neither
-  is drivetrain-related.
+**A real process lesson from the same day, worth stating plainly:**
+several rounds of edits to this file were built on a fresh clone from
+GitHub, on the mistaken assumption that GitHub reflected the current
+real state — it didn't, since earlier local fixes had never actually
+been committed. Each new edit silently regressed real, working local
+progress. The fix going forward: always confirm the actual current git
+status (or, better, get local changes committed) before building
+further edits on top of a fresh clone — don't assume GitHub is
+up to date just because a recent handoff happened.
 
-**Real naming guidance agreed for these specific documents:**
-- The vessel-wide equipment list: `AllSystems_Vessel_AllModels_EquipmentList_Rev[X].pdf`
-- The switchboard wiring diagram: `MainSwitchboard_[Manufacturer]_[Model]_WiringDiagram_Rev[X].pdf`
-
-**Real folder fix agreed, not yet done:** move both new folders out to
-become *siblings* of Drivetrain TMs (directly under "Vessel Maintenance
-System Documents"), not children of it. No technical ingestion problem
-either way — `scan_folder.py` scans recursively regardless of nesting —
-but once moved, the ingestion command needs to point at the parent
-folder instead of "Drivetrain TMs" specifically, to pick up every
-system's folder in one recursive scan.
-
-**Committed: fix the structural gap and move the folders tomorrow, then
-ingest.**
+**Real folder and naming work completed the same day:** four new
+document folders (Genset TMs, Hull TMs, JAK System TMs, MainSwitchboard
+Distribution Panel TMs) correctly organized as siblings of Drivetrain
+TMs, not nested inside it; all new documents renamed to match
+convention; the old drivetrain-only equipment list superseded by the
+new vessel-wide one.
 
 **Related, one level down (Aug 2026):** the same shape of problem is
 starting on the *subsystem* level, not just across systems. Raised
@@ -615,7 +612,7 @@ something structured, not just free text.
 - `db.py` — two new columns (`safety_info`, `field_notes_used`) so a
   reloaded past conversation replays identically to how it looked live,
   not just the answer text.
-- `app.py` — the answer now renders in this order: Field Notes (expanded
+- `app.py` — the answer now renders in this order: Engineer Notes (expanded
   by default) → the answer → Safety Information (collapsed) → View
   Sources (collapsed, combining citations + images, never dropping a
   source just because it lacks an image).

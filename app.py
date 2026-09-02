@@ -217,8 +217,18 @@ with st.sidebar:
                 try:
                     options = with_connection_retry(engineer_notes.get_equipment_options)
                 except Exception:
-                    options = [(engineer_notes.GENERAL_CATEGORY, None)]
-                labels = [f"{cat} — {pos}" if pos else cat for cat, pos in options]
+                    options = [("General", engineer_notes.GENERAL_CATEGORY, None)]
+                # Labels include system (Sept 2026, real trigger — see
+                # BACKLOG.md's equipment dropdown scaling entry) so the
+                # list stays scannable as systems beyond drivetrain get
+                # added — Streamlit's selectbox already supports typing
+                # to filter, so "Drivetrain — Main Engine — Port" lets
+                # someone type "Drivetrain" or "Fire" to jump straight
+                # to the right system's items.
+                labels = [
+                    f"{sys} — {cat} — {pos}" if pos else f"{sys} — {cat}"
+                    for sys, cat, pos in options
+                ]
                 # st.form (Aug 2026, real bug fix): a real incident produced
                 # 4 duplicate copies of the same note, submitted seconds
                 # apart — almost certainly "Add Note" clicked more than
@@ -236,7 +246,7 @@ with st.sidebar:
                     submitted = st.form_submit_button("Add Note")
                     if submitted:
                         if note_text.strip():
-                            category, position = options[labels.index(selected_label)]
+                            _system, category, position = options[labels.index(selected_label)]
                             try:
                                 with_connection_retry(
                                     engineer_notes.add_note, category, position,
