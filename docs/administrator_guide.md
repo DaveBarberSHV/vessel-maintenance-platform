@@ -278,3 +278,22 @@ See `manage_users.py`'s own usage notes for the full flow (password
 entered hidden, confirmed twice, never passed as a command-line
 argument).
 
+---
+
+## 10. Recurring security review — quarterly
+
+Committed Sept 2026, during the first NIST SP 800-171 review (see
+`nist_800-171_rev3_tracker.xlsx`, control 03.12.03) — this can't be a
+one-time exercise; the standard genuinely requires an ongoing practice,
+not a single pass.
+
+**Commitment: revisit `nist_800-171_rev3_tracker.xlsx` every quarter.**
+Each pass should:
+- Re-check any control marked "Planned" for real progress against its
+  stated timeline.
+- Re-check anything left informal (Personnel Screening, Alternate Work
+  Site) for whether the team's growth has changed the real risk calculus.
+- Add any new real findings from the quarter (the same way the RLS and
+  SSL incidents got folded in as real evidence this time).
+
+
