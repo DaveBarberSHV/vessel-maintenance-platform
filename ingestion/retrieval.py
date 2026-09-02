@@ -156,7 +156,13 @@ def get_pg_url() -> str:
 
 
 def get_pg_connection():
-    return psycopg2.connect(get_pg_url())
+    """sslmode="require" (Sept 2026, real incident) — see db.py's
+    get_connection() docstring for the full explanation: the server
+    supports SSL but doesn't enforce it by default, and our own
+    connections were found to be silently unencrypted despite that
+    support existing. Applied here too, since ingestion connects to the
+    exact same database independently of the deployed app."""
+    return psycopg2.connect(get_pg_url(), sslmode="require")
 
 
 def ensure_pg_schema(conn):

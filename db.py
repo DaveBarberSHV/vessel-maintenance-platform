@@ -59,8 +59,16 @@ def get_connection():
     on the server indefinitely. A real one sat "idle in transaction" for
     almost 6 hours and silently blocked every new session's schema-check
     step from completing, which looked exactly like unexplained hanging/
-    slowness with no error message. See BACKLOG.md."""
-    conn = psycopg2.connect(get_db_url())
+    slowness with no error message. See BACKLOG.md.
+
+    sslmode="require" (Sept 2026, real incident) — the server supports SSL
+    but doesn't enforce it by default, and a real check found our own
+    connection was silently using plain, unencrypted traffic despite that
+    support existing. Explicitly requiring SSL here means this connection
+    refuses to proceed without it, regardless of whatever the platform's
+    own "Enforce SSL" setting happens to be — this shouldn't depend on a
+    dashboard toggle staying correctly configured forever."""
+    conn = psycopg2.connect(get_db_url(), sslmode="require")
     conn.autocommit = True
     return conn
 
