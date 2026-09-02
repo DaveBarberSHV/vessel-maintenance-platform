@@ -5,6 +5,36 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## 🔺 MFA on key service/admin accounts — real, immediate action for Dave (Sept 2026)
+
+**What:** Enabling multi-factor authentication on the *administrative*
+accounts that control the system's real infrastructure — genuinely
+different from control 03.05.03 in `nist_800-171_rev3_tracker.xlsx`,
+which is specifically about MFA for people logging into Fathom's own
+chat app. This is about the accounts that hold real power over
+everything underneath it.
+
+**Why now:** raised directly by Dave, prompted by finishing the NIST
+review and thinking through the Supabase security recommendations from
+earlier the same day. Not something Claude can build or fix — this is
+account-level dashboard settings, action required from Dave directly.
+
+**Real, prioritized list:**
+1. **Supabase** — highest priority. Whoever controls this controls
+   every table, every row, everything.
+2. **GitHub** — holds the entire codebase, and is the actual deployment
+   source Streamlit Cloud builds from. A compromise here could mean
+   malicious code getting pushed and auto-deployed.
+3. **Streamlit Community Cloud** — controls the live, running app and
+   its secrets, including `SUPABASE_DB_URL` itself.
+4. **Anthropic Console** — controls API access and billing for every
+   model call the app depends on.
+
+**Not yet done** — captured here so it isn't lost between finishing the
+review and actually getting to it.
+
+---
+
 ## 🔺 Multi-Factor Authentication — committed before first full-scale deployment (Sept 2026)
 
 **What:** Today's login (`auth.py`) is password-only, single-factor.
