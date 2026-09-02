@@ -83,6 +83,11 @@ DOCTYPE_LABELS = {
 # benefit here.
 COMMON_ENGLISH_WORDS = {"the", "and", "of", "to", "in", "for", "on", "is", "with", "at"}
 
+# Promoted to module level (Sept 2026) so other tools (e.g.
+# audit_garbled_text.py) can reuse the exact same real threshold rather
+# than duplicate the number and risk it drifting out of sync.
+VISION_CANDIDATE_CHAR_THRESHOLD = 200
+
 
 def is_real_language(text: str) -> bool:
     """True if text plausibly contains genuine English prose, not just
@@ -410,7 +415,6 @@ def scan_folder(folder: Path, engine: str = "voyage"):
             # catches this: reversed or otherwise garbled text has
             # essentially none of the extremely common short words real
             # English prose always has ("the," "and," "of," "to").
-            VISION_CANDIDATE_CHAR_THRESHOLD = 200
             text_chunks = [
                 c for c in file_chunks
                 if len(c.text.strip()) >= VISION_CANDIDATE_CHAR_THRESHOLD
