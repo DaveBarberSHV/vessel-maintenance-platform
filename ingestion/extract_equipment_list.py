@@ -46,6 +46,13 @@ EXTRACTION_SYSTEM_PROMPT = """You extract structured equipment data from vessel 
 
 Read the provided text and return a JSON array of equipment entries. Each entry:
 {
+  "system": "the broader vessel system this equipment belongs to, e.g. 'Drivetrain', 'Fire \
+Suppression', 'HVAC', 'Electrical', 'Deck Equipment' — infer this from section headers, \
+groupings, or context within the document itself. A single document may cover MULTIPLE \
+systems (e.g. a vessel-wide equipment list covering drivetrain, fire pumps, air compressors, \
+a crane, and water pumps together) — identify each item's own real system individually, \
+never default every item in the document to one system just because that's what the \
+document's own title/filename suggests.",
   "category": "short category name, e.g. 'Main Engine', 'Azimuth Drive', 'Wheel/Propeller', 'Marine Clutch/Steering', 'Driveline Bearing'",
   "position": "Port" or "Starboard" or null if not applicable (normalize abbreviations \
 like PME/SME to Port/Starboard — PME = Port Main Engine, SME = Starboard Main Engine),
@@ -76,17 +83,68 @@ def extract_equipment(pdf_path: Path, api_key: str = None) -> list[dict]:
         raise ValueError("No ANTHROPIC_API_KEY available.")
 
     client = anthropic.Anthropic(api_key=key)
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4000,
-        system=EXTRACTION_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": text}],
+
+    # Retry on malformed JSON (Sept 2026, real bug found via two live
+    # ingestion runs) — the first failure looked like a max_tokens
+    # truncation (a real, separate, now-fixed bug below), but a second
+    # failure at nearly the same character position, with the SAME
+    # file, on a run that reported stop_reason="end_turn" (a normal,
+    # complete response, not a truncation), proved this is a genuine,
+    # intermittent JSON-formatting slip by the model — not a fixed
+    # structural problem with one specific piece of content. Confirmed
+    # directly: re-running the identical extraction with zero changes
+    # succeeded cleanly. A retry is the correct, evidence-based fix for
+    # an intermittent failure — not further guessing at which character
+    # might be "the" problem, since there isn't one fixed problem
+    # character to find.
+    MAX_ATTEMPTS = 3
+    last_error = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            # Raised from 4000 (Sept 2026, real bug found via a real, live
+            # ingestion run) — the original limit was sized for the old
+            # ~10-item drivetrain-only equipment list. The first real
+            # vessel-wide list (30+ items: generators, JAK system, nine
+            # separate pumps, fuel oil, potable water, the crane...) hit
+            # this limit exactly, silently truncating the JSON mid-string
+            # and producing a cryptic JSONDecodeError ("Unterminated
+            # string...") rather than a clear "ran out of room" error.
+            # Raised generously, not just to the exact size that would
+            # have covered this one list, since equipment lists will
+            # likely keep growing as more systems get documented.
+            max_tokens=16000,
+            system=EXTRACTION_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": text}],
+        )
+        if response.stop_reason == "max_tokens":
+            raise ValueError(
+                "Claude's response was cut off because it hit the max_tokens "
+                "limit before finishing — the equipment list is larger than "
+                "this limit currently allows. Raise max_tokens in "
+                "extract_equipment() further (currently 16000) rather than "
+                "guess at the JSON parsing error this would otherwise "
+                "produce."
+            )
+        raw = response.content[0].text.strip()
+        # Defensive: strip markdown fences if the model adds them despite instructions not to
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            last_error = e
+            print(f"    Attempt {attempt}/{MAX_ATTEMPTS}: malformed JSON "
+                  f"({e}) — retrying." if attempt < MAX_ATTEMPTS else
+                  f"    Attempt {attempt}/{MAX_ATTEMPTS}: malformed JSON "
+                  f"({e}) — out of retries.")
+
+    raise ValueError(
+        f"Equipment extraction produced malformed JSON {MAX_ATTEMPTS} times "
+        f"in a row (last error: {last_error}) — this goes beyond the normal "
+        f"occasional intermittent failure this retry logic already covers; "
+        f"worth a real look rather than retrying again."
     )
-    raw = response.content[0].text.strip()
-    # Defensive: strip markdown fences if the model adds them despite instructions not to
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-    return json.loads(raw)
 
 
 def ensure_equipment_schema(conn):
@@ -94,6 +152,7 @@ def ensure_equipment_schema(conn):
         cur.execute("""
             CREATE TABLE IF NOT EXISTS vessel_equipment (
                 id BIGSERIAL PRIMARY KEY,
+                system TEXT NOT NULL DEFAULT 'Drivetrain',
                 category TEXT NOT NULL,
                 position TEXT,
                 manufacturer TEXT,
@@ -103,9 +162,33 @@ def ensure_equipment_schema(conn):
                 notes TEXT,
                 source_document TEXT,
                 source_page INT,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                UNIQUE (category, position)
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
+        """)
+        # Real migration for anyone re-running this against an existing
+        # database created before this column existed (Sept 2026) —
+        # CREATE TABLE IF NOT EXISTS alone won't add a column to an
+        # already-existing table.
+        cur.execute("""
+            ALTER TABLE vessel_equipment
+                ADD COLUMN IF NOT EXISTS system TEXT NOT NULL DEFAULT 'Drivetrain';
+        """)
+        # Replace the old (category, position)-only uniqueness with the
+        # real, three-part identity — safe to run repeatedly.
+        cur.execute("""
+            ALTER TABLE vessel_equipment DROP CONSTRAINT IF EXISTS vessel_equipment_category_position_key;
+        """)
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'vessel_equipment_system_category_position_key'
+                ) THEN
+                    ALTER TABLE vessel_equipment
+                        ADD CONSTRAINT vessel_equipment_system_category_position_key
+                        UNIQUE (system, category, position);
+                END IF;
+            END $$;
         """)
         # RLS enabled directly here, not left as a separate manual step
         # (Sept 2026, real incident) — see auth.py's ensure_users_schema()
@@ -117,9 +200,9 @@ def ensure_equipment_schema(conn):
 def upsert_equipment(conn, entries: list[dict], source_document: str):
     rows = [
         (
-            e["category"], e.get("position"), e.get("manufacturer"), e.get("model"),
-            e.get("serial_number"), json.dumps(e.get("specs") or {}), e.get("notes"),
-            source_document,
+            e.get("system") or "Drivetrain", e["category"], e.get("position"),
+            e.get("manufacturer"), e.get("model"), e.get("serial_number"),
+            json.dumps(e.get("specs") or {}), e.get("notes"), source_document,
         )
         for e in entries
     ]
@@ -128,9 +211,9 @@ def upsert_equipment(conn, entries: list[dict], source_document: str):
             cur,
             """
             INSERT INTO vessel_equipment
-                (category, position, manufacturer, model, serial_number, specs, notes, source_document)
+                (system, category, position, manufacturer, model, serial_number, specs, notes, source_document)
             VALUES %s
-            ON CONFLICT (category, position) DO UPDATE SET
+            ON CONFLICT (system, category, position) DO UPDATE SET
                 manufacturer = EXCLUDED.manufacturer,
                 model = EXCLUDED.model,
                 serial_number = EXCLUDED.serial_number,
@@ -141,17 +224,12 @@ def upsert_equipment(conn, entries: list[dict], source_document: str):
             """,
             rows,
             # 9 placeholders, matching the 9-value row tuple above
-            # exactly (system, category, position, manufacturer, model,
-            # serial_number, specs, notes, source_document). Real bug
-            # fixed here (Sept 2026, found via a real live ingestion
-            # run): this template still had only 8 placeholders after
-            # `system` was added as a new first column — the column
-            # list and the row tuple were both updated correctly, but
-            # this template wasn't, silently misaligning every row's
-            # values against the wrong columns and producing a
-            # confusing, unrelated-looking "no unique constraint
-            # matching ON CONFLICT" error rather than an obvious count
-            # mismatch.
+            # exactly. Real bug fixed here (Sept 2026, found via a real
+            # live ingestion run): this template only had 8 placeholders
+            # after `system` was added as a new first column — silently
+            # misaligning every row's values against the wrong columns
+            # and producing a confusing, unrelated-looking "no unique
+            # constraint matching ON CONFLICT" error.
             template="(%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
         )
     conn.commit()
@@ -167,9 +245,9 @@ def get_equipment_list(conn) -> list[dict]:
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT category, position, manufacturer, model, serial_number, specs, notes
+                SELECT system, category, position, manufacturer, model, serial_number, specs, notes
                 FROM vessel_equipment
-                ORDER BY category, position
+                ORDER BY system, category, position
             """)
             return [dict(r) for r in cur.fetchall()]
     except Exception:
@@ -177,12 +255,20 @@ def get_equipment_list(conn) -> list[dict]:
 
 
 def format_equipment_list(entries: list[dict]) -> str:
-    """Formats the registry as compact text for a prompt."""
+    """Formats the registry as compact text for a prompt. Grouped by
+    system (Sept 2026, real trigger — see BACKLOG.md's equipment
+    dropdown scaling entry) rather than one flat list, so the injected
+    context stays scannable as more systems beyond drivetrain get
+    ingested."""
     if not entries:
         return ""
     lines = ["Vessel equipment currently installed (use this to know which "
              "model/variant applies when a TM covers multiple options):"]
+    last_system = None
     for e in entries:
+        if e["system"] != last_system:
+            lines.append(f"\n{e['system']}:")
+            last_system = e["system"]
         parts = [e["category"]]
         if e.get("position"):
             parts.append(e["position"])
