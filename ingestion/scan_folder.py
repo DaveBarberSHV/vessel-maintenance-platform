@@ -83,24 +83,76 @@ DOCTYPE_LABELS = {
 # benefit here.
 COMMON_ENGLISH_WORDS = {"the", "and", "of", "to", "in", "for", "on", "is", "with", "at"}
 
+# The 20 most common English letter pairs (bigrams) — a well-established
+# linguistic fact, not something that changes. Used as a more robust
+# signal than COMMON_ENGLISH_WORDS alone (Sept 2026, real fix — see
+# is_real_language()'s docstring): genuine English spelling, whether
+# flowing prose OR a file path/title-block stamp, has a predictable,
+# elevated rate of these pairs. Character-reversing text destroys this
+# pattern completely ("the" -> "eht" replaces "th"/"he" with "ht"/"eh"),
+# regardless of whether the underlying content was ever "prose" in the
+# first place.
+COMMON_ENGLISH_BIGRAMS = {
+    "th", "he", "in", "er", "an", "re", "on", "at", "en", "nd",
+    "ti", "es", "or", "te", "of", "ed", "is", "it", "al", "ar",
+}
+
 # Promoted to module level (Sept 2026) so other tools (e.g.
 # audit_garbled_text.py) can reuse the exact same real threshold rather
 # than duplicate the number and risk it drifting out of sync.
 VISION_CANDIDATE_CHAR_THRESHOLD = 200
 
 
+def _common_word_count(text: str) -> int:
+    words = set(w.strip(".,;:()[]\"'\\").lower() for w in text.split())
+    return len(words & COMMON_ENGLISH_WORDS)
+
+
+def _bigram_rate(text: str) -> float:
+    """Fraction of adjacent letter pairs in text that are common English
+    bigrams. Only counts pairs where both characters are letters, so
+    punctuation/numbers/whitespace don't dilute the signal."""
+    letters_only = "".join(c for c in text.lower() if c.isalpha())
+    if len(letters_only) < 20:
+        return 0.0
+    pairs = [letters_only[i:i + 2] for i in range(len(letters_only) - 1)]
+    common = sum(1 for p in pairs if p in COMMON_ENGLISH_BIGRAMS)
+    return common / len(pairs)
+
+
 def is_real_language(text: str) -> bool:
-    """True if text plausibly contains genuine English prose, not just
-    a long string of characters. Real motivating case: a page's native
-    text was a rotated title-block stamp extracted with every character
-    reversed — long enough to clear the length threshold, semantically
-    meaningless to any embedding model. A short title/label with no
-    prose at all (e.g. just a drawing number) is expected to fail this
-    check too — that's fine, since such a page is short enough to be
-    caught by the length threshold anyway; this check only matters for
-    the case a page is long AND garbled, not long and just terse."""
-    words = set(w.strip(".,;:()[]\"'").lower() for w in text.split())
-    return len(words & COMMON_ENGLISH_WORDS) >= 2
+    """True if text plausibly contains genuine, correctly-ordered
+    English content — prose, a title block, a file path, anything with
+    normal English spelling — not reversed or otherwise garbled. Real
+    motivating case: a page's native text was a rotated title-block
+    stamp extracted with every character reversed — long enough to
+    clear the length threshold, semantically meaningless to any
+    embedding model. A short title/label with no real content at all
+    (e.g. just a drawing number) is expected to fail this check too —
+    that's fine, since such a page is short enough to be caught by the
+    length threshold anyway; this check only matters for the case a
+    page is long AND garbled, not long and just terse.
+
+    Refined twice on the same real bug (Sept 2026). First refinement
+    (common-word check, both directions) was too narrow: the real
+    garbled text, correctly reversed, decodes to a file path and
+    title-block stamp ("...Boarding Ladders.dwg, AutoCAD - Issued...")
+    — genuine, correctly-spelled content, but not flowing prose, so it
+    doesn't naturally contain filler words like "the"/"and" in either
+    direction, and the fix failed its own test against the real bug it
+    was built for. Second refinement (this version) uses letter-bigram
+    frequency instead of whole-word matching — a more robust signal
+    that works whether the underlying real content is prose, a
+    filename, or a title stamp, since all of them share normal English
+    spelling patterns when correctly oriented, and lose that pattern
+    completely when reversed."""
+    forward_rate = _bigram_rate(text)
+    if forward_rate >= 0.08:
+        return True
+    reversed_rate = _bigram_rate(text[::-1])
+    if reversed_rate >= 0.08 and reversed_rate > forward_rate * 2:
+        return False
+    return True
 
 
 def validate_pdf(path: Path) -> tuple[bool, str | None]:
