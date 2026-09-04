@@ -5,41 +5,44 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
-## 🔺 is_real_language() likely over-triggers on legitimate technical content — needs real calibration
+## ✅ RESOLVED (mostly) — is_real_language() recalibrated from word-matching to bigram frequency
 
-**What:** The garbled-text fix built the same day (see the
-`is_real_language()` entry — search `scan_folder.py`) checks for common
-English filler words ("the," "and," "of") to catch reversed/garbled
-native text. Built and proven correct against the one real case that
-motivated it (a reversed AutoCAD title-block stamp). **Not yet proven
-safe at scale.**
+**Real progress, next day (Sept 2026):** the original common-word check
+was fully replaced with a letter-bigram frequency signal — genuine
+English spelling (whether prose, a title stamp, or a filename) has a
+predictable, elevated rate of common two-letter sequences ("th," "he,"
+"in," "er"); character-reversal destroys this pattern completely,
+regardless of whether the underlying real content was ever flowing
+prose. This is a more robust signal than word-matching, which failed
+its own test against the real bug it was built for (a reversed stamp
+decodes to a file path, not prose, and doesn't naturally contain filler
+words in either direction).
 
-**Real, concerning finding the same day:** running `audit_garbled_text.py`
-against the entire real library flagged **27 files** — including real,
-known-good OMM manuals, parts lists, and service reports already
-successfully used to answer real questions earlier the same day. That
-volume and content mix is far more consistent with a **false-positive
-problem in the check itself** than with 27 genuinely broken documents.
-**Real, honest hypothesis, not yet confirmed:** dense technical
-content — parts lists, spec tables, diagnostic codes — is naturally
-sparse in common English filler words simply because it's mostly part
-numbers and model designations, which could trigger the same signature
-as genuinely garbled text without actually being broken.
+**Real, measured result:** re-running `audit_garbled_text.py` against
+the same real library dropped the flagged count from 27 to 4. Each of
+the 4 was individually inspected with real evidence
+(`inspect_page.py`), not assumed either way:
+- **3 confirmed real matches** — `Hull_MBB_S43CraneFoundation_DWG_Rev0.pdf`,
+  `Hull_MBB_S46GeneratorFoundations_DWG_Rev0.pdf`,
+  `AzimuthThruster_MBB_ZDriveInstallationM10_DWG_Rev1.pdf` — all the same
+  real pattern as the original boarding-ladders bug, a reversed AutoCAD
+  title-block stamp. Reprocessed successfully.
+- **1 confirmed false positive** — `MainEngines_CAT_3512E_PartsList_Rev07012021.pdf`,
+  p. 716 — genuinely legitimate CAT parts data (verified directly:
+  real part numbers, "SHIELD AS-EXHAUST," correctly ordered). **Not
+  reprocessed** — left as-is.
 
-**Explicitly not acted on the same day** — reprocessing any of those 27
-files would mean real API cost and, worse, potentially replacing
-genuinely good native text with a worse AI reinterpretation for
-documents that were never actually broken. Too risky to run without
-understanding the false-positive rate first.
-
-**Real next step, not yet done:** manually inspect a genuine sample of
-the 27 flagged files (`inspect_page.py`) to determine how many are
-truly garbled versus legitimately terse, dense, real content. Then
-either raise the common-word threshold, exempt certain document types
-(parts lists, spec tables) from this check, or find a more precise
-signal that doesn't confuse "genuinely reversed" with "genuinely
-technical." The one real, confirmed case (boarding ladders) is not at
-risk — already fixed and verified independently of this open question.
+**Real, remaining, understood limitation, not fully solved:** the one
+false positive reveals a genuine edge case — very narrow dense-table
+sub-chunks (6 rows, almost entirely part numbers) can have low bigram
+density purely from being so numeric, without being reversed or broken.
+**Judged acceptable to leave as-is for now**: low real-world cost even
+if a similar narrow numeric sub-chunk is occasionally reprocessed
+unnecessarily elsewhere (vision extraction of a real table would likely
+produce equivalent correct content anyway, just at some avoidable API
+cost) — a meaningfully different risk profile than the original
+problem, which silently omitted real content entirely. Worth a further
+refinement someday if it turns out to matter in practice, not urgent.
 
 ---
 
