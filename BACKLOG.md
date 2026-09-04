@@ -5,6 +5,37 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## ✅ RESOLVED — duplicate detection by filename missed real content matches
+
+**Real bug found (Sept 2026):** yesterday's rename-proposal script
+detected duplicates by comparing drawing codes and proposed filenames —
+correct as far as it went, but it missed cases where the same physical
+drawing had a slightly different code between the yard's naming and an
+already-ingested file's naming (`M1` vs `M01`, `E09` filed under
+`Electrical` vs an existing `MainSwitchboard` filing for the same fault
+current analysis). Two such pairs slipped through, both already valid
+Fathom-convention names, so `scan_folder.py` couldn't tell which was
+canonical — it just saw the same content under two valid names and
+flip-flopped between treating each as a "rename" of the other on
+alternating runs. Confusing symptom, simple root cause.
+
+**Real fix:** `ingestion/find_duplicate_files.py` — finds duplicates by
+comparing actual file size across the whole library, not filename
+similarity. A direct, reliable proxy for identical content (confirmed:
+every size-matched pair found was byte-for-byte identical). Run against
+the real library: found 9 groups. 7 were harmless (a yard-named copy
+correctly being skipped by naming-convention checking, sitting alongside
+an already-ingested convention-compliant file — clutter, not a bug). 2
+were real active bugs (including the flip-flopping case above) —
+resolved by deleting the redundant copy and reprocessing.
+
+**Real lesson:** name-based duplicate detection is inherently fragile
+against inconsistent numbering between two independent naming schemes.
+Size-based comparison is a simple, robust complement — worth running
+after any future large batch import, not just this one.
+
+---
+
 ## ✅ RESOLVED (mostly) — is_real_language() recalibrated from word-matching to bigram frequency
 
 **Real progress, next day (Sept 2026):** the original common-word check
