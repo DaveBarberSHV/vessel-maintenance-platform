@@ -39,6 +39,7 @@ from answer_query import get_answer, format_sources  # noqa: E402
 import db  # noqa: E402
 import auth  # noqa: E402
 import engineer_notes  # noqa: E402
+from document_inventory import get_document_library  # noqa: E402
 
 st.set_page_config(page_title="Fathom - Polaris", page_icon="⚓")
 
@@ -175,121 +176,6 @@ if not st.session_state.user_name:
                 except Exception as e:
                     st.error(f"Couldn't verify login right now ({e}).")
     st.stop()
-
-with st.sidebar:
-    st.write(f"Logged in as **{st.session_state.user_name}**")
-    if st.button("Log out"):
-        st.session_state.user_name = None
-        st.session_state.messages = []
-        if "conversation_id" in st.session_state:
-            del st.session_state["conversation_id"]
-        st.rerun()
-
-    if db_available:
-        st.divider()
-        if st.button("+ New conversation", use_container_width=True):
-            st.session_state.conversation_id = db.new_conversation_id()
-            st.session_state.messages = []
-            st.rerun()
-
-        # Engineer Notes (Aug 2026) — standalone entry point. See
-        # BACKLOG.md for the full design (Jared's real motivating example,
-        # why attribution is non-negotiable, why this reuses the
-        # equipment registry's identity rather than free text). A second,
-        # inline entry point attached to a specific answer (pre-filled
-        # from that answer's own equipment context) is deliberately not
-        # built — deferred unless real usage shows genuine friction with
-        # the standalone button, see BACKLOG.md.
-        #
-        # Restricted to a known list of authors (Aug 2026, real
-        # requirement from Jared): these notes carry real weight — shown
-        # before the answer, treated with real authority — so the button
-        # itself is only shown to people on that list at all, rather than
-        # shown to everyone and blocked with an error. See
-        # engineer_notes.AUTHORIZED_NOTE_AUTHORS to add someone (e.g. a
-        # newly delegated Chief Engineer). Now backed by real login (Aug
-        # 2026) rather than a typed name, so this check is a genuine
-        # authorization check, not just a display filter.
-        author_role = engineer_notes.AUTHORIZED_NOTE_AUTHORS.get(st.session_state.user_name)
-        if author_role:
-            with st.popover("📝 + Engineer Note", use_container_width=True):
-                st.caption("Real-world experience — kept clearly separate from manufacturer data.")
-                try:
-                    options = with_connection_retry(engineer_notes.get_equipment_options)
-                except Exception:
-                    options = [("General", engineer_notes.GENERAL_CATEGORY, None)]
-                # Labels include system (Sept 2026, real trigger — see
-                # BACKLOG.md's equipment dropdown scaling entry) so the
-                # list stays scannable as systems beyond drivetrain get
-                # added — Streamlit's selectbox already supports typing
-                # to filter, so "Drivetrain — Main Engine — Port" lets
-                # someone type "Drivetrain" or "Fire" to jump straight
-                # to the right system's items.
-                labels = [
-                    f"{sys} — {cat} — {pos}" if pos else f"{sys} — {cat}"
-                    for sys, cat, pos in options
-                ]
-                # st.form (Aug 2026, real bug fix): a real incident produced
-                # 4 duplicate copies of the same note, submitted seconds
-                # apart — almost certainly "Add Note" clicked more than
-                # once while the form still showed the same filled-in
-                # text. A form only submits once, explicitly, on its own
-                # submit button (not on every stray widget interaction),
-                # and clear_on_submit=True resets the fields afterward —
-                # both make an accidental resubmission much harder.
-                with st.form("engineer_note_form", clear_on_submit=True):
-                    selected_label = st.selectbox("Equipment", labels, key="note_equipment_select")
-                    note_text = st.text_area(
-                        "Note", placeholder="What did you notice or adjust, and why?",
-                        key="note_text_input",
-                    )
-                    submitted = st.form_submit_button("Add Note")
-                    if submitted:
-                        if note_text.strip():
-                            _system, category, position = options[labels.index(selected_label)]
-                            try:
-                                with_connection_retry(
-                                    engineer_notes.add_note, category, position,
-                                    st.session_state.user_name, note_text.strip(),
-                                    author_role=author_role)
-                                st.success("Note added — it'll be used in future answers about this equipment.")
-                            except Exception as e:
-                                st.error(f"Couldn't save the note right now ({e}).")
-                        else:
-                            st.warning("Please enter a note before submitting.")
-
-        # Grouped by recency (Aug 2026) — replaces a single flat list
-        # that was hard-capped at 20 conversations, past which older
-        # ones silently vanished from the sidebar with no indication
-        # anything was missing. Nothing is deleted; db.list_conversations
-        # now fetches a much larger practical limit, and
-        # group_conversations_by_recency() organizes the full list into
-        # Today/Yesterday/This Week/This Month/Older sections — the same
-        # pattern used by most chat apps for exactly this problem. Only
-        # non-empty groups are shown, so an empty "This Month" header
-        # never appears just because nothing happens to be in it.
-        try:
-            past = with_connection_retry(db.list_conversations, st.session_state.user_name)
-        except Exception:
-            past = []
-        grouped = db.group_conversations_by_recency(past)
-        for group_name, convos in grouped.items():
-            if not convos:
-                continue
-            st.caption(group_name)
-            for convo in convos:
-                label = convo["first_message"][:40] + ("..." if len(convo["first_message"]) > 40 else "")
-                if st.button(label, key=f"convo_{convo['conversation_id']}", use_container_width=True):
-                    st.session_state.conversation_id = str(convo["conversation_id"])
-                    st.session_state.messages = with_connection_retry(
-                        db.load_conversation, str(convo["conversation_id"]))
-                    st.rerun()
-
-if "conversation_id" not in st.session_state:
-    st.session_state.conversation_id = db.new_conversation_id() if db_available else "local-only"
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
 
 def render_field_notes(message: dict):
     """Engineer Notes referenced in forming this answer, rendered BEFORE
@@ -448,6 +334,197 @@ def render_assistant_message(message: dict, key_prefix: str):
         if chunks:
             st.caption("Answer with sources")
             st.code(message["content"] + "\n\n" + format_sources(chunks), language=None)
+
+
+with st.sidebar:
+    st.write(f"Logged in as **{st.session_state.user_name}**")
+    if st.button("Log out"):
+        st.session_state.user_name = None
+        st.session_state.messages = []
+        if "conversation_id" in st.session_state:
+            del st.session_state["conversation_id"]
+        st.rerun()
+
+    if db_available:
+        st.divider()
+        if st.button("+ New conversation", use_container_width=True):
+            st.session_state.conversation_id = db.new_conversation_id()
+            st.session_state.messages = []
+            st.rerun()
+
+        # Engineer Notes (Aug 2026) — standalone entry point. See
+        # BACKLOG.md for the full design (Jared's real motivating example,
+        # why attribution is non-negotiable, why this reuses the
+        # equipment registry's identity rather than free text). A second,
+        # inline entry point attached to a specific answer (pre-filled
+        # from that answer's own equipment context) is deliberately not
+        # built — deferred unless real usage shows genuine friction with
+        # the standalone button, see BACKLOG.md.
+        #
+        # Restricted to a known list of authors (Aug 2026, real
+        # requirement from Jared): these notes carry real weight — shown
+        # before the answer, treated with real authority — so the button
+        # itself is only shown to people on that list at all, rather than
+        # shown to everyone and blocked with an error. See
+        # engineer_notes.AUTHORIZED_NOTE_AUTHORS to add someone (e.g. a
+        # newly delegated Chief Engineer). Now backed by real login (Aug
+        # 2026) rather than a typed name, so this check is a genuine
+        # authorization check, not just a display filter.
+        author_role = engineer_notes.AUTHORIZED_NOTE_AUTHORS.get(st.session_state.user_name)
+        if author_role:
+            with st.popover("📝 + Engineer Note", use_container_width=True):
+                st.caption("Real-world experience — kept clearly separate from manufacturer data.")
+                try:
+                    options = with_connection_retry(engineer_notes.get_equipment_options)
+                except Exception:
+                    options = [("General", engineer_notes.GENERAL_CATEGORY, None)]
+                # Labels include system (Sept 2026, real trigger — see
+                # BACKLOG.md's equipment dropdown scaling entry) so the
+                # list stays scannable as systems beyond drivetrain get
+                # added — Streamlit's selectbox already supports typing
+                # to filter, so "Drivetrain — Main Engine — Port" lets
+                # someone type "Drivetrain" or "Fire" to jump straight
+                # to the right system's items.
+                labels = [
+                    f"{sys} — {cat} — {pos}" if pos else f"{sys} — {cat}"
+                    for sys, cat, pos in options
+                ]
+                # st.form (Aug 2026, real bug fix): a real incident produced
+                # 4 duplicate copies of the same note, submitted seconds
+                # apart — almost certainly "Add Note" clicked more than
+                # once while the form still showed the same filled-in
+                # text. A form only submits once, explicitly, on its own
+                # submit button (not on every stray widget interaction),
+                # and clear_on_submit=True resets the fields afterward —
+                # both make an accidental resubmission much harder.
+                with st.form("engineer_note_form", clear_on_submit=True):
+                    selected_label = st.selectbox("Equipment", labels, key="note_equipment_select")
+                    note_text = st.text_area(
+                        "Note", placeholder="What did you notice or adjust, and why?",
+                        key="note_text_input",
+                    )
+                    submitted = st.form_submit_button("Add Note")
+                    if submitted:
+                        if note_text.strip():
+                            _system, category, position = options[labels.index(selected_label)]
+                            try:
+                                with_connection_retry(
+                                    engineer_notes.add_note, category, position,
+                                    st.session_state.user_name, note_text.strip(),
+                                    author_role=author_role)
+                                st.success("Note added — it'll be used in future answers about this equipment.")
+                            except Exception as e:
+                                st.error(f"Couldn't save the note right now ({e}).")
+                        else:
+                            st.warning("Please enter a note before submitting.")
+
+        # Document library panel (Sept 2026) — lets engineers browse what's
+        # in the system by system rather than relying on retrieval to find
+        # the right document. Real motivating gap: "show me the shaft
+        # arrangement drawing" didn't reliably retrieve the drawing via
+        # semantic search (shaft component content from manuals scored
+        # higher). Clicking a document fires a pre-formed "show me" question
+        # into the chat, which triggers the existing SHOW_DOCUMENT feature.
+        st.divider()
+        with st.expander("📂 Document Library", expanded=False):
+            st.caption("Browse by system — click any document to view it.")
+            try:
+                library = with_connection_retry(get_document_library)
+            except Exception:
+                library = {}
+            if not library:
+                st.caption("Library not available right now.")
+            else:
+                for system, docs in library.items():
+                    st.markdown(f"**{system}**")
+                    for doc in docs:
+                        rev = f" · {doc['revision']}" if doc.get("revision") else ""
+                        doc_type = f" · {doc['document_type']}" if doc.get("document_type") else ""
+                        label = f"{doc['document_title']}{doc_type}{rev}"
+                        if st.button(label, key=f"lib_{doc['document_title']}", use_container_width=True):
+                            # Fire a "show me" question for this document —
+                            # triggers the SHOW_DOCUMENT feature in answer_query.py
+                            # so the page image surfaces prominently above the answer.
+                            show_q = f"Show me the {doc['document_title']}"
+                            st.session_state.messages.append({"role": "user", "content": show_q})
+                            with st.chat_message("user"):
+                                st.markdown(show_q)
+                            if db_available:
+                                try:
+                                    with_connection_retry(
+                                        db.save_message,
+                                        st.session_state.conversation_id,
+                                        st.session_state.user_name, "user", show_q)
+                                except Exception:
+                                    pass
+                            with st.chat_message("assistant"):
+                                with st.spinner("Searching the TMs..."):
+                                    try:
+                                        result = get_answer(show_q)
+                                        answer_text = result["answer"]
+                                        chunks = result["chunks"]
+                                        safety_info = result.get("safety_info", "")
+                                        field_notes_used = result.get("field_notes_used", [])
+                                        show_document_images = result.get("show_document_images", [])
+                                    except Exception as e:
+                                        answer_text = f"⚠️ Something went wrong: {e}"
+                                        chunks, safety_info, field_notes_used, show_document_images = [], "", [], []
+                            new_message = {
+                                "role": "assistant", "content": answer_text, "chunks": chunks,
+                                "safety_info": safety_info, "field_notes_used": field_notes_used,
+                                "show_document_images": show_document_images,
+                            }
+                            if db_available:
+                                try:
+                                    new_message["id"] = with_connection_retry(
+                                        db.save_message,
+                                        st.session_state.conversation_id,
+                                        st.session_state.user_name, "assistant",
+                                        answer_text, chunks=chunks, safety_info=safety_info,
+                                        field_notes_used=field_notes_used,
+                                        show_document_images=show_document_images)
+                                except Exception:
+                                    pass
+                            st.session_state.messages.append(new_message)
+                            render_assistant_message(
+                                new_message,
+                                key_prefix=f"lib_{new_message.get('id', len(st.session_state.messages))}")
+                            st.rerun()
+
+        # Grouped by recency (Aug 2026) — replaces a single flat list
+        # that was hard-capped at 20 conversations, past which older
+        # ones silently vanished from the sidebar with no indication
+        # anything was missing. Nothing is deleted; db.list_conversations
+        # now fetches a much larger practical limit, and
+        # group_conversations_by_recency() organizes the full list into
+        # Today/Yesterday/This Week/This Month/Older sections — the same
+        # pattern used by most chat apps for exactly this problem. Only
+        # non-empty groups are shown, so an empty "This Month" header
+        # never appears just because nothing happens to be in it.
+        try:
+            past = with_connection_retry(db.list_conversations, st.session_state.user_name)
+        except Exception:
+            past = []
+        grouped = db.group_conversations_by_recency(past)
+        for group_name, convos in grouped.items():
+            if not convos:
+                continue
+            st.caption(group_name)
+            for convo in convos:
+                label = convo["first_message"][:40] + ("..." if len(convo["first_message"]) > 40 else "")
+                if st.button(label, key=f"convo_{convo['conversation_id']}", use_container_width=True):
+                    st.session_state.conversation_id = str(convo["conversation_id"])
+                    st.session_state.messages = with_connection_retry(
+                        db.load_conversation, str(convo["conversation_id"]))
+                    st.rerun()
+
+if "conversation_id" not in st.session_state:
+    st.session_state.conversation_id = db.new_conversation_id() if db_available else "local-only"
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+
+
 
 
 for i, message in enumerate(st.session_state.messages):

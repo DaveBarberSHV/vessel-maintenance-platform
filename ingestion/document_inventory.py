@@ -20,7 +20,38 @@ unconditionally. No new data entry required — this is built entirely
 from what's already in tm_chunks.
 """
 
+from collections import defaultdict
+
 import psycopg2.extras
+
+
+def get_document_library(conn) -> dict[str, list[dict]]:
+    """Returns documents grouped by system for the library browsability
+    panel (Sept 2026). System is extracted from the document_title prefix
+    (the naming convention guarantees it's always the first word before
+    the first ' - '). Returns an alphabetically-sorted dict of
+    system → [documents], each document having title, document_type, and
+    revision. Returns {} rather than raising — same resilience pattern as
+    the rest of this module."""
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT DISTINCT document_title, document_type, revision
+                FROM tm_chunks
+                ORDER BY document_title
+            """)
+            rows = [dict(r) for r in cur.fetchall()]
+    except Exception:
+        return {}
+
+    grouped = defaultdict(list)
+    for row in rows:
+        # document_title format: "System - Manufacturer Model DocType"
+        # e.g. "Hull - MBB S42 General Arrangement Drawing"
+        system = row["document_title"].split(" - ")[0].strip()
+        grouped[system].append(row)
+
+    return dict(sorted(grouped.items()))
 
 
 def get_document_inventory(conn) -> list[dict]:
