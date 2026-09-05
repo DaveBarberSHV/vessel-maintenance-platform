@@ -317,6 +317,16 @@ completed first — see git history for that early build order):**
   Information and combined Sources after
 - The maritime rebrand — "Fathom - Polaris," professional theme, hidden
   developer chrome
+- **Auto-surfacing documents on explicit request** (Sept 2026) — a
+  `###SHOW_DOCUMENT###` structured response section detects genuine "show
+  me" language and surfaces the specific page image prominently above the
+  answer, rather than buried in the collapsed Sources section. Missed
+  detection falls back gracefully to Sources, never a false positive.
+- **Document library browsability panel** (Sept 2026) — a 📂 Document
+  Library expander in the sidebar lists all documents grouped by system.
+  Clicking any document fires a pre-formed "show me" question into the
+  chat, bypassing retrieval for navigation entirely. Solves the real gap
+  where semantic search reliably failed for drawing requests.
 
 ## Diagnostic tooling (repo root, run locally — not part of the deployed app)
 
@@ -370,23 +380,34 @@ vs. reasoning miss — rather than guessing.
 - A real password/access gate before the wider crew gets the URL —
   deliberately deferred, see `BACKLOG.md`
 - A live Google Drive connector, if/when one becomes available
-- OCR/vision-based extraction for scanned reference docs and drawings —
-  several library files have no searchable text (see `BACKLOG.md`); Jared's
-  suggested fallback (link directly to the source page/document rather
-  than requiring full OCR) is a real, simpler alternative worth weighing
-- Torque and length unit conversions — requested by Dave, same pattern as
-  the already-built temperature/pressure conversions, not yet added
+- **Large-format drawing resolution** — vision extraction already handles
+  scanned pages and image-only drawings automatically (built Aug 2026,
+  see above). The one remaining open piece: wide engineering sheets that
+  exceed Claude's vision API 8000px limit. Tiling into higher-resolution
+  sections is scoped but not yet built — see `BACKLOG.md`.
+- **Retrieval boost for drawing requests** — when a question contains
+  genuine "show me" language plus a known document title from the
+  inventory, inject that document's chunks directly rather than relying
+  on semantic search, which reliably fails for drawings (shaft component
+  content from manuals scores higher than the actual drawing). Scoped
+  Sept 2026 — see `BACKLOG.md`.
 - Anything supporting more than one vessel
-- The equipment dropdown (Engineer Notes and the registry) will get
-  unwieldy once systems beyond drivetrain are added — a real, anticipated
-  scaling issue, not urgent yet; see `BACKLOG.md` for the fix path
-  (an explicit `system` field, reusing the TM naming convention's
-  vocabulary)
 - A second, inline entry point for Engineer Notes (attached to a
   specific answer, pre-filled from its equipment context) — deliberately
   downgraded from a planned fast-follow to "only if real usage shows
   friction," once the standalone button proved to work well on its own;
   see `BACKLOG.md`
+
+**Items previously listed here that are now built:**
+- OCR/vision-based extraction — ✅ built Aug 2026 as `vision_extraction.py`
+  (see ingestion section above); large-format limit remains, see above
+- Torque and length unit conversions — ✅ built, part of `UNIT_CONVERSIONS`
+  table in `answer_query.py` alongside temperature/pressure
+- Equipment dropdown scaling — ✅ resolved Sept 2026 via explicit `system`
+  field; see the resolved entry in `BACKLOG.md`
+- Document library browsability panel — ✅ built Sept 2026; engineers can
+  browse all documents by system in the sidebar and click to view any
+  document directly, bypassing retrieval for navigation
 
 See `BACKLOG.md` for the reasoning behind each deferred item, and
 `README.md` for the broader project state.

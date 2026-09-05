@@ -5,6 +5,77 @@ why it's deferred, and what would trigger picking it up.
 
 ---
 
+## 🔲 Retrieval boost for drawing requests — next priority (Sept 2026)
+
+**What:** When a question contains genuine "show me" language plus a
+known document title fragment from the inventory, bypass semantic search
+entirely and inject that document's chunks directly. Semantic search
+reliably fails for drawings — shaft component content from manuals scores
+higher than the actual drawing — and this was confirmed live the same
+day the library browsability panel was built.
+
+**Real motivating case:** clicking "AzimuthThruster - MBB
+ShaftArrangementM1 General Arrangement Drawing" from the library panel
+correctly fired a "Show me the..." question, but retrieved BergPropulsion
+MTA O&M Manual pages instead of the drawing. The system honestly told
+the user the drawing existed but wasn't retrieved — correct behavior, but
+not what the panel promises.
+
+**Why deferred:** the library panel itself was the higher-value fix
+(navigation without retrieval at all); the retrieval boost is the
+complementary fix for when someone asks via natural language rather than
+the panel. Scoped and ready to build next session.
+
+**How to build:** in `answer_query.py`'s retrieval path, check whether
+the question contains showing-language AND a title substring that matches
+a document in `get_document_inventory()`. If so, fetch that document's
+chunks directly by `document_title` rather than running vector search.
+The library panel click already generates a question in the exact format
+needed: `"Show me the {document_title}"`.
+
+---
+
+## 🔲 Document library panel — two small follow-on items (Sept 2026)
+
+**1. Verbose button labels.** Each document button currently shows the
+full `document_title` (e.g. "AzimuthThruster - BergPropulsion MTA O&M
+Manual") under a group header that already says "AzimuthThruster." The
+system prefix is redundant. Fix: strip the `"{System} - "` prefix from
+the label since the group header already carries it.
+
+**2. SDS needs a friendly DocType label.** `CAT Coolant DEAC SDS` was
+ingested today with DocType `SDS` (Safety Data Sheet) — a new type not
+yet in `DOCTYPE_LABELS` in `scan_folder.py`. Currently displays as raw
+`SDS` in the UI. One-line fix: add `"SDS": "Safety Data Sheet"` to that
+dict. Worth doing the next time a code change touches `scan_folder.py`.
+
+---
+
+## 🔲 Empty file — CAT Coolant DEAC SDS (Sept 2026)
+
+**What:** `MainEngines_CAT_CoolantDEAC_SDS_Rev1.pdf` was created as a
+0-byte empty file during the rename process — the original `CAT Coolant
+DEAC SDS.pdf` may have been empty or corrupted in Drive to begin with.
+The file was flagged by `scan_folder.py` as "FAILED validation — 0
+bytes" and was not ingested.
+
+**Action needed:** open the original in Drive, confirm whether real
+content exists, and if so re-upload it correctly. Once a valid PDF is in
+place, `scan_folder.py` will pick it up as new on the next run.
+
+---
+
+## 🔲 Alfa Laval duplicate still in Drive (Sept 2026)
+
+**What:** `Fuel Oil System/FuelOil_AlfaLaval_MMB304S_PARTSLIST_Rev1.pdf`
+is an exact duplicate of the correctly-filed copy in `FuelSystem/`. The
+rename process correctly refused to overwrite the existing file. The old
+copy in the `Fuel Oil System/` subfolder needs to be manually deleted
+from Drive. Once deleted, the `Fuel Oil System/` subfolder itself is
+likely empty and can be removed too.
+
+---
+
 ## ✅ RESOLVED — duplicate detection by filename missed real content matches
 
 **Real bug found (Sept 2026):** yesterday's rename-proposal script
@@ -194,6 +265,13 @@ architecture needed, just applying the existing pattern to a new kind
 of event.
 
 **Committed target: 30 days from Sept 2026.**
+
+**Note added Sept 2026:** the document library browsability panel
+(built same day) introduces a new category of security-relevant user
+action — clicking to view a specific document. When the audit log is
+built, document browse events (who viewed which document, when) should
+be logged alongside login attempts, account changes, and Engineer Note
+submissions.
 
 ---
 
