@@ -449,7 +449,8 @@ with st.sidebar:
                         rev = f" · {doc['revision']}" if doc.get("revision") else ""
                         doc_type = f" · {doc['document_type']}" if doc.get("document_type") else ""
                         label = f"{doc['document_title']}{doc_type}{rev}"
-                        if st.button(label, key=f"lib_{doc['document_title']}", use_container_width=True):
+                        safe_key = f"lib_{doc['document_title']}_{doc.get('document_type','')}_{doc.get('revision','')}".replace(" ", "_")
+                        if st.button(label, key=safe_key, use_container_width=True):
                             # Fire a "show me" question for this document —
                             # triggers the SHOW_DOCUMENT feature in answer_query.py
                             # so the page image surfaces prominently above the answer.
