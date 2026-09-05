@@ -61,11 +61,26 @@ flowchart LR
     B --> E["✅ Page images<br/>Supabase Storage"]
 ```
 
-- **Google Drive** — real shared folder in active use (`Drivetrain TMs`).
-  Naming convention (`[System]_[Manufacturer]_[Model]_[DocType]_Rev[X].pdf`,
+- **Google Drive** — real shared folder in active use ("Vessel
+  Maintenance System Documents," containing per-system subfolders —
+  Drivetrain, Genset, Hull, JAK System, MainSwitchboard, and more added
+  Sept 2026). Naming convention (`[System]_[Manufacturer]_[Model]_[DocType]_Rev[X].pdf`,
   see `docs/tm_upload_checklist.md`) now includes `DWG` and `RefData`
   catch-all doc types. No live connector exists yet — see `BACKLOG.md`.
   Files are uploaded here by hand, then pulled in via `scan_folder.py`.
+  **Real milestone (Sept 2026):** the library expanded from a
+  drivetrain-only prototype to the vessel's actual shipyard drawing
+  package — 79 files renamed from the yard's own numbering convention
+  (`ingestion/propose_renames.py` proposes convention-compliant names
+  with a reviewable CSV, `ingestion/apply_renames.py` applies them after
+  human approval) and ingested across 9 new systems (GeneralArrangement,
+  Stability, Electrical, Piping, Tonnage, CompressedAir, FuelOil, HVAC,
+  plus more Hull content). Library now: 131 files, ~20 systems, ~7,900
+  chunks. Verified live against real, specific questions across the new
+  systems (piping GPM ratings, electrical fault current calculations,
+  gross tonnage) with accurate, well-sourced answers — including
+  correctly recognizing genuine ambiguity (US vs. international tonnage
+  regimes) rather than picking one arbitrarily.
 - **Parse & chunk** — `ingestion/parse_and_chunk.py` + `ingestion/table_extraction.py`.
   Genuine PDFs get structured table extraction (recovers marker/checkbox
   cells that plain text loses — verified fix, see `BACKLOG.md`), not just
@@ -76,6 +91,12 @@ flowchart LR
   count ("p. 672 of 1415") for newly-ingested documents, clarifying that
   the number is the PDF's physical page position, not necessarily the
   document's own printed page number — see `BACKLOG.md`.
+  **NUL-byte stripping added Sept 2026** — real bug: a CAD-exported PDF
+  failed ingestion entirely ("A string literal cannot contain NUL (0x00)
+  characters" — Postgres flatly rejects them, a known if uncommon
+  quirk of some CAD export paths). Stripped once, at the single point
+  all extracted text passes through, so every caller downstream gets
+  clean text automatically.
 - **Embed chunks** — `ingestion/retrieval.py`. Real semantic embeddings via
   Voyage AI. Batching was rebuilt around Voyage's real per-request limits
   (hard character-based batches, not an estimated-token guess) after real
@@ -158,6 +179,16 @@ flowchart LR
   reading its fine print clearly. A real fix (tiling a large page into
   higher-resolution sections) is scoped but deliberately not built yet
   — see `BACKLOG.md`.
+  **`is_real_language()` check added Sept 2026** — real bug: a page can
+  have a genuine text layer that's still not real content — a rotated
+  AutoCAD title-block stamp extracted with every character reversed
+  cleared the length threshold with zero actual value, silently
+  skipping vision extraction entirely and leaving real drawing content
+  never captured by anything. Detects this via letter-bigram frequency
+  (genuine English spelling, whether prose or a filename, has a
+  predictable rate of common two-letter sequences; reversal destroys
+  it completely) — refined once already after an initial word-matching
+  version proved too narrow, see `BACKLOG.md` for the full story.
 
 ## Query time (engineer asks a question, gets a cited answer)
 
@@ -311,6 +342,17 @@ up:
   with the tools above: shows the exact prompt, retrieved chunks, and
   their distances for a real question, without spending an API call on
   an actual answer.
+- **`ingestion/find_duplicate_files.py`** — added Sept 2026, real trigger:
+  a large batch import (79 shipyard drawings) included several files
+  that were the same underlying drawing as something already ingested,
+  just numbered slightly differently between the yard's convention and
+  an earlier individual renaming (`M1` vs `M01`). Name-based duplicate
+  checking missed these; the symptom was confusing (a file silently
+  flip-flopping between two names on alternating `scan_folder.py` runs).
+  Compares exact file size across the whole library instead — a direct,
+  reliable proxy for identical content, confirmed against every real
+  case found. Worth running after any future large batch import, not
+  just this one.
 
 **The real investigative pattern that emerged from using these together
 (Aug 2026):** `--dry-run` shows what got retrieved and how well it
