@@ -338,6 +338,31 @@ def render_safety_info(message: dict):
         st.markdown(safety_info)
 
 
+def render_show_document_images(message: dict):
+    """Auto-surfaces the specific drawing/page a question explicitly
+    asked to be SHOWN (Sept 2026, real request from Dave: "Can you show
+    me the drawing of the Shaft Arrangement?" should return the drawing,
+    not bury it in the collapsed View Sources section below).
+
+    Deliberately renders directly, always-visible, right after the
+    answer text — not in an expander like Safety Info or Sources —
+    since the whole point is that this IS what the question asked for,
+    not supplementary material someone has to opt into seeing. Only
+    fires when Claude's own SHOW_DOCUMENT section identified genuine
+    showing-language in the question itself (see answer_query.py's
+    SYSTEM_PROMPT) — a normal question that's merely answered using a
+    drawing still only shows that drawing in the normal Sources
+    section below, unchanged."""
+    images = message.get("show_document_images")
+    if not images:
+        return
+    for img in images:
+        total = img.get("total_pages")
+        page_label = f'p. {img["page_number"]} of {total}' if total else f'p. {img["page_number"]}'
+        st.markdown(f'**{img["document_title"]}, {page_label}**')
+        st.image(img["url"])
+
+
 def render_sources(chunks: list[dict] | None):
     """Combined citation list + page images (Aug 2026) — previously two
     separate things (a plain-text "Sources:" caption, and a separate
@@ -377,15 +402,19 @@ def render_sources(chunks: list[dict] | None):
 
 def render_assistant_message(message: dict, key_prefix: str):
     """Renders a complete assistant message in the agreed order (Aug
-    2026): Field Notes (before the answer, if any), the answer itself,
-    Safety Information (collapsed, after), View Sources (collapsed,
-    combining citations + images), then feedback and copy. Shared by
-    both historical messages (loaded from the sidebar) and the live
-    answer just generated, so they always look and behave identically.
-    key_prefix must be unique per message (message id if saved, or the
-    live index) since Streamlit widgets need stable, unique keys."""
+    2026, updated Sept 2026): Field Notes (before the answer, if any),
+    the answer itself, any auto-surfaced "show me" image (Sept 2026 —
+    directly after the answer, always visible, since it IS the thing
+    asked for), Safety Information (collapsed, after), View Sources
+    (collapsed, combining citations + images), then feedback and copy.
+    Shared by both historical messages (loaded from the sidebar) and the
+    live answer just generated, so they always look and behave
+    identically. key_prefix must be unique per message (message id if
+    saved, or the live index) since Streamlit widgets need stable,
+    unique keys."""
     render_field_notes(message)
     st.markdown(message["content"])
+    render_show_document_images(message)
     render_safety_info(message)
     render_sources(message.get("chunks"))
 
@@ -450,6 +479,7 @@ if question:
                 chunks = result["chunks"]
                 safety_info = result.get("safety_info", "")
                 field_notes_used = result.get("field_notes_used", [])
+                show_document_images = result.get("show_document_images", [])
             except ValueError as e:
                 # get_voyage_key()/get_answer() raise cleanly on a missing
                 # key rather than crashing the app — see BACKLOG.md and the
@@ -460,15 +490,18 @@ if question:
                 chunks = []
                 safety_info = ""
                 field_notes_used = []
+                show_document_images = []
             except Exception as e:
                 answer_text = f"⚠️ Something went wrong answering that: {e}"
                 chunks = []
                 safety_info = ""
                 field_notes_used = []
+                show_document_images = []
 
         new_message = {
             "role": "assistant", "content": answer_text, "chunks": chunks,
             "safety_info": safety_info, "field_notes_used": field_notes_used,
+            "show_document_images": show_document_images,
         }
         if db_available:
             try:
@@ -476,7 +509,8 @@ if question:
                     db.save_message, st.session_state.conversation_id,
                     st.session_state.user_name, "assistant",
                     answer_text, chunks=chunks, safety_info=safety_info,
-                    field_notes_used=field_notes_used)
+                    field_notes_used=field_notes_used,
+                    show_document_images=show_document_images)
             except Exception:
                 pass
 

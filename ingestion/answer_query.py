@@ -196,7 +196,7 @@ reference only used in the FIELD_NOTE_IDS section below; it means \
 nothing to the reader and must never appear in visible text.
 
 Response format — structure your ENTIRE response using exactly these \
-three sections, in this exact order, with these exact headers, even when \
+four sections, in this exact order, with these exact headers, even when \
 a section has nothing to report for this question:
 
 ###FIELD_NOTE_IDS###
@@ -209,6 +209,22 @@ If the excerpts contain a WARNING, CAUTION, NOTICE, or similar \
 safety-relevant statement that's relevant to this specific question, \
 reproduce it here close to verbatim from the excerpt — don't paraphrase \
 safety-critical wording. If nothing applies, write NONE.
+
+###SHOW_DOCUMENT###
+Only report something here if the question ITSELF explicitly asks to be \
+SHOWN something — genuine showing-language like "show me," "can I see," \
+"picture of," "what does X look like," "let me see the drawing." A \
+question that merely CITES or is ANSWERED USING a drawing/image does \
+NOT qualify — e.g. "what's the GPM rating on the pump" is answered using \
+a schematic but never asked to see it, so this must be NONE even though \
+a relevant excerpt exists. If genuine showing-language is present AND \
+one or more of the excerpts above is the specific thing being asked to \
+be shown, list those excerpt numbers here, comma-separated (e.g. "2" or \
+"1, 3"). Otherwise, or if you're not confident the question is really \
+asking to be shown something specifically, write NONE — a missed \
+detection here just means the image stays in the normal Sources list \
+instead of appearing prominently, which is a far smaller cost than \
+showing a large image on a question that didn't really ask for one.
 
 ###ANSWER###
 Your actual answer, following all the rules above. Do not repeat the \
@@ -237,20 +253,29 @@ conversation is starting over.
 
 def parse_structured_response(raw_text: str) -> dict:
     """Splits Claude's structured response (see SYSTEM_PROMPT's Response
-    Format section) into its three parts. Falls back gracefully to
+    Format section) into its four parts. Falls back gracefully to
     treating the WHOLE response as the answer — no field notes, no
-    safety info — if the expected markers aren't found or don't parse
-    cleanly. This must never be the reason an answer fails to display,
-    even on the rare response where Claude doesn't follow the format
-    exactly."""
-    result = {"field_note_ids": [], "safety_info": "", "answer": raw_text}
-    markers = ("###FIELD_NOTE_IDS###", "###SAFETY_INFO###", "###ANSWER###")
+    safety info, no show-document reference — if the expected markers
+    aren't found or don't parse cleanly. This must never be the reason
+    an answer fails to display, even on the rare response where Claude
+    doesn't follow the format exactly.
+
+    show_document_excerpts added Sept 2026 — see architecture.md's
+    "Auto-surfacing a document" entry. Deliberately parsed the same
+    reliable way as field_note_ids: Claude reports which excerpt
+    NUMBER(S) it means, and get_answer() below resolves those numbers
+    into real image URLs from the chunks' own metadata — the same
+    established pattern used for citations generally (code resolves
+    real data, Claude never has to know or report a URL itself)."""
+    result = {"field_note_ids": [], "safety_info": "", "show_document_excerpts": [], "answer": raw_text}
+    markers = ("###FIELD_NOTE_IDS###", "###SAFETY_INFO###", "###SHOW_DOCUMENT###", "###ANSWER###")
     if not all(m in raw_text for m in markers):
         return result
     try:
         _, rest = raw_text.split(markers[0], 1)
         ids_part, rest = rest.split(markers[1], 1)
-        safety_part, answer_part = rest.split(markers[2], 1)
+        safety_part, rest = rest.split(markers[2], 1)
+        show_part, answer_part = rest.split(markers[3], 1)
 
         ids_part = ids_part.strip()
         if ids_part and ids_part.upper() != "NONE":
@@ -262,9 +287,15 @@ def parse_structured_response(raw_text: str) -> dict:
         if safety_part and safety_part.upper() != "NONE":
             result["safety_info"] = safety_part
 
+        show_part = show_part.strip()
+        if show_part and show_part.upper() != "NONE":
+            result["show_document_excerpts"] = [
+                int(x.strip()) for x in show_part.split(",") if x.strip().isdigit()
+            ]
+
         result["answer"] = answer_part.strip()
     except Exception:
-        return {"field_note_ids": [], "safety_info": "", "answer": raw_text}
+        return {"field_note_ids": [], "safety_info": "", "show_document_excerpts": [], "answer": raw_text}
     return result
 
 
@@ -378,6 +409,12 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
                                    # actually referenced, fetched directly
                                    # from the database — not Claude's own
                                    # paraphrase (Aug 2026)
+            "show_document_images": list[dict],  # {"url", "document_title",
+                                   # "page_number"} for any excerpt Claude
+                                   # identified as the SPECIFIC thing a
+                                   # question explicitly asked to be shown
+                                   # (Sept 2026) — the app renders these
+                                   # prominently, not tucked in Sources
         }
 
     Raises:
@@ -460,12 +497,36 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
         except Exception:
             pass  # if the exact notes can't be fetched, just don't show them — never break the answer
 
+    # show_document_images (Sept 2026) — resolves Claude's reported
+    # excerpt numbers into real image data from the chunks' own
+    # metadata, the same reliable pattern as format_sources(): code
+    # reads real data, never trusts a model to know or report a URL
+    # itself. 1-indexed to match how excerpts are numbered in
+    # build_prompt(); an out-of-range or missing-image excerpt is
+    # silently skipped rather than raising, since a wrong/missing image
+    # here should never be the reason an answer fails to display.
+    show_document_images = []
+    seen_urls = set()
+    for excerpt_num in parsed["show_document_excerpts"]:
+        idx = excerpt_num - 1
+        if 0 <= idx < len(chunks):
+            m = chunks[idx]["metadata"]
+            url = m.get("page_image_url")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                show_document_images.append({
+                    "url": url,
+                    "document_title": m["document_title"],
+                    "page_number": m["page_number"],
+                })
+
     return {
         "answer": parsed["answer"],
         "chunks": chunks,
         "prompt": prompt,
         "safety_info": parsed["safety_info"],
         "field_notes_used": field_notes_used,
+        "show_document_images": show_document_images,
     }
 
 
@@ -563,6 +624,10 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
         sys.exit(str(e))
 
     print(result["answer"])
+    if result.get("show_document_images"):
+        print("\n📄 Shown prominently (question explicitly asked to see this):")
+        for img in result["show_document_images"]:
+            print(f'- {img["document_title"]}, p. {img["page_number"]}: {img["url"]}')
     if result.get("safety_info"):
         print(f"\n⚠️ Safety Information:\n{result['safety_info']}")
     if result.get("field_notes_used"):

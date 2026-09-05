@@ -111,6 +111,10 @@ def ensure_schema(conn):
             ALTER TABLE messages
                 ADD COLUMN IF NOT EXISTS field_notes_used JSONB;
         """)
+        cur.execute("""
+            ALTER TABLE messages
+                ADD COLUMN IF NOT EXISTS show_document_images JSONB;
+        """)
         # RLS enabled directly here, not left as a separate manual step
         # (Sept 2026, real incident) — see auth.py's ensure_users_schema()
         # docstring for the full explanation. Safe to call repeatedly.
@@ -121,7 +125,8 @@ def ensure_schema(conn):
 def save_message(conn, conversation_id: str, user_name: str, role: str,
                   content: str, chunks: list | None = None,
                   safety_info: str | None = None,
-                  field_notes_used: list | None = None) -> int:
+                  field_notes_used: list | None = None,
+                  show_document_images: list | None = None) -> int:
     """Returns the new row's id — the caller (app.py) needs this to later
     attach feedback to the specific message a thumbs-up/down was clicked
     on."""
@@ -129,14 +134,16 @@ def save_message(conn, conversation_id: str, user_name: str, role: str,
         cur.execute(
             """
             INSERT INTO messages
-                (conversation_id, user_name, role, content, chunks, safety_info, field_notes_used)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                (conversation_id, user_name, role, content, chunks, safety_info,
+                 field_notes_used, show_document_images)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (conversation_id, user_name, role, content,
              json.dumps(chunks) if chunks is not None else None,
              safety_info,
-             json.dumps(field_notes_used) if field_notes_used is not None else None),
+             json.dumps(field_notes_used) if field_notes_used is not None else None,
+             json.dumps(show_document_images) if show_document_images is not None else None),
         )
         new_id = cur.fetchone()[0]
     conn.commit()
@@ -159,7 +166,7 @@ def load_conversation(conn, conversation_id: str) -> list[dict]:
         cur.execute(
             """
             SELECT id, role, content, chunks, feedback, safety_info,
-                   field_notes_used, created_at
+                   field_notes_used, show_document_images, created_at
             FROM messages
             WHERE conversation_id = %s
             ORDER BY created_at ASC, id ASC
@@ -176,6 +183,7 @@ def load_conversation(conn, conversation_id: str) -> list[dict]:
             "feedback": r["feedback"],
             "safety_info": r["safety_info"],
             "field_notes_used": r["field_notes_used"] if r["field_notes_used"] is not None else None,
+            "show_document_images": r["show_document_images"] if r["show_document_images"] is not None else None,
         }
         for r in rows
     ]
