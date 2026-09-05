@@ -336,6 +336,14 @@ def render_assistant_message(message: dict, key_prefix: str):
             st.code(message["content"] + "\n\n" + format_sources(chunks), language=None)
 
 
+# Initialize session state before the sidebar runs — the Document Library
+# panel (inside the sidebar) can fire a question into the chat, which
+# requires messages and conversation_id to already exist.
+if "conversation_id" not in st.session_state:
+    st.session_state.conversation_id = db.new_conversation_id() if db_available else "local-only"
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 with st.sidebar:
     st.write(f"Logged in as **{st.session_state.user_name}**")
     if st.button("Log out"):
@@ -518,10 +526,7 @@ with st.sidebar:
                         db.load_conversation, str(convo["conversation_id"]))
                     st.rerun()
 
-if "conversation_id" not in st.session_state:
-    st.session_state.conversation_id = db.new_conversation_id() if db_available else "local-only"
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+
 
 
 
