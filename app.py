@@ -242,11 +242,23 @@ def render_show_document_images(message: dict):
     images = message.get("show_document_images")
     if not images:
         return
-    for img in images:
+    # Cap display at 5 pages — drawings are typically 1–5 pages and display
+    # well in full; full manuals can be 200+ pages and are better navigated
+    # via Q&A than a wall of images. The fetch stays at 15 chunks so Claude
+    # has full context; we just limit what's rendered here (Sept 2026).
+    MAX_DISPLAY = 5
+    display_images = images[:MAX_DISPLAY]
+    for img in display_images:
         total = img.get("total_pages")
         page_label = f'p. {img["page_number"]} of {total}' if total else f'p. {img["page_number"]}'
         st.markdown(f'**{img["document_title"]}, {page_label}**')
         st.image(img["url"])
+    if len(images) > MAX_DISPLAY:
+        remaining = len(images) - MAX_DISPLAY
+        st.caption(
+            f"Showing first {MAX_DISPLAY} of {len(images)} pages. "
+            f"Ask a specific question to find a particular section."
+        )
 
 
 def render_sources(chunks: list[dict] | None):
