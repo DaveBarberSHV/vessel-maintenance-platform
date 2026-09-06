@@ -264,7 +264,61 @@ def delete_chunks(conn, chunk_ids: list[str]):
     conn.commit()
 
 
-def load_chunks():
+def fetch_chunks_by_title(document_title: str, top_k: int = 15) -> list[dict]:
+    """Fetch chunks directly by exact document_title match — used by the
+    retrieval boost for drawing requests (Sept 2026, see BACKLOG.md and
+    architecture.md). When a library panel click fires a 'Show me the...'
+    question, we know exactly which document was requested, so semantic
+    search adds no value and reliably fails (shaft component content from
+    manuals scores higher than the actual drawing). This bypasses the
+    embedding entirely and fetches the document's own chunks ordered by
+    page number, which is the natural reading order for a drawing or manual.
+
+    Returns the same {text, metadata, distance} dict format as query_chunks()
+    so callers treat it identically — distance is set to 0.0 as a sentinel
+    meaning 'exact match requested, not a ranked result'.
+
+    top_k defaulted to 15 (vs the normal 5) because a drawing or short
+    reference doc is typically 1–10 pages and we want to surface all of
+    them for the SHOW_DOCUMENT feature to pick the right page image from,
+    not just the first few chunks."""
+    conn = get_pg_connection()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT text, document_title, revision, page_number, total_pages,
+                       equipment_model, document_type, source_file, page_image_url
+                FROM {PG_TABLE}
+                WHERE document_title = %s
+                ORDER BY page_number
+                LIMIT %s
+                """,
+                (document_title, top_k),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {
+            "text": r["text"],
+            "metadata": {
+                "document_title": r["document_title"],
+                "revision": r["revision"],
+                "page_number": r["page_number"],
+                "total_pages": r["total_pages"],
+                "equipment_model": r["equipment_model"],
+                "document_type": r["document_type"],
+                "source_file": r["source_file"],
+                "page_image_url": r["page_image_url"],
+            },
+            "distance": 0.0,  # sentinel: exact match, not a ranked result
+        }
+        for r in rows
+    ]
+
+
     if not CHUNKS_PATH.exists():
         sys.exit(f"No chunks found at {CHUNKS_PATH} — run ingestion/parse_and_chunk.py first "
                   f"and copy its chunks.jsonl output here.")

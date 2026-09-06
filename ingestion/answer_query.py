@@ -22,7 +22,7 @@ import os
 import re
 import sys
 
-from retrieval import query_chunks, extract_code_like_terms, keyword_search_chunks
+from retrieval import query_chunks, extract_code_like_terms, keyword_search_chunks, fetch_chunks_by_title
 
 
 # Real case that motivated this (Aug 2026, Jared's first live test): "We
@@ -361,6 +361,62 @@ Manual excerpts retrieved for this question:
 Answer the question using only the excerpts above."""
 
 
+
+# Retrieval boost for drawing/document requests (Sept 2026, see BACKLOG.md).
+# When a question contains genuine "show me" language AND the question text
+# contains a known document title from the inventory, we bypass semantic
+# search entirely and fetch that document's chunks directly by title.
+#
+# Real motivating case: clicking "AzimuthThruster - MBB ShaftArrangementM1
+# General Arrangement Drawing" from the library panel fired a "Show me the..."
+# question but semantic search returned BergPropulsion MTA O&M Manual pages
+# instead of the drawing. Semantic search reliably fails for this case because
+# shaft component content from manuals is semantically similar to shaft-related
+# drawing descriptions — the drawing itself scores lower.
+#
+# This is deterministic, not language-dependent: the library panel generates
+# questions in the exact format "Show me the {document_title}", so the match
+# is essentially guaranteed for panel clicks. Natural-language "show me"
+# requests that don't match a known title fall through to normal retrieval
+# unchanged.
+SHOW_LANGUAGE_PATTERN = re.compile(
+    r"\b(show\s+me|can\s+I\s+see|let\s+me\s+see|display|view|picture\s+of|"
+    r"what\s+does\s+.+\s+look\s+like|pull\s+up)\b",
+    re.IGNORECASE,
+)
+
+
+def find_matching_document_title(question: str) -> str | None:
+    """If the question contains showing-language AND a known document title
+    from the inventory, returns the matched title so the caller can fetch
+    its chunks directly. Returns None if no match — falls through to normal
+    semantic search. Case-insensitive title match, requiring the full title
+    to appear in the question (the library panel generates questions in the
+    exact format 'Show me the {document_title}', so this is reliable for
+    panel clicks; natural-language partial matches are deliberately not
+    attempted to avoid false positives on common words like 'Hull').
+
+    Fetches the inventory fresh on each call — cheap since it's a DISTINCT
+    query on an indexed column, and this keeps the function stateless."""
+    if not SHOW_LANGUAGE_PATTERN.search(question):
+        return None
+    try:
+        from retrieval import get_pg_connection
+        from document_inventory import get_document_inventory
+        conn = get_pg_connection()
+        inventory = get_document_inventory(conn)
+        conn.close()
+    except Exception:
+        return None
+
+    question_lower = question.lower()
+    for doc in inventory:
+        title = doc.get("document_title", "")
+        if title and title.lower() in question_lower:
+            return title
+    return None
+
+
 def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
                api_key: str | None = None, previous_exchange: dict | None = None) -> dict:
     """The importable core of this module — used by both the CLI below and
@@ -431,8 +487,17 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
     if previous_exchange and previous_exchange.get("question"):
         search_text = f"{previous_exchange['question']} {question}"
     search_query = expand_units(search_text)
-    chunks = query_chunks(search_query, engine=engine, top_k=top_k)
-    chunks = add_exact_code_matches(question, chunks)
+
+    # Retrieval boost (Sept 2026) — if the question contains showing-language
+    # AND matches a known document title exactly, fetch that document's chunks
+    # directly rather than relying on semantic search, which reliably fails for
+    # drawings. Falls through to normal retrieval if no title match is found.
+    matched_title = find_matching_document_title(question)
+    if matched_title:
+        chunks = fetch_chunks_by_title(matched_title, top_k=15)
+    else:
+        chunks = query_chunks(search_query, engine=engine, top_k=top_k)
+        chunks = add_exact_code_matches(question, chunks)
 
     equipment_context = ""
     try:
