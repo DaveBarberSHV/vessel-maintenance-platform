@@ -435,7 +435,6 @@ with st.sidebar:
         # into the chat, which triggers the existing SHOW_DOCUMENT feature.
         st.divider()
         with st.expander("📂 Document Library", expanded=False):
-            st.caption("Browse by system — click any document to view it.")
             try:
                 library = with_connection_retry(get_document_library)
             except Exception:
@@ -443,12 +442,39 @@ with st.sidebar:
             if not library:
                 st.caption("Library not available right now.")
             else:
+                filter_text = st.text_input(
+                    "Filter documents",
+                    placeholder="Type to filter...",
+                    key="lib_filter",
+                    label_visibility="collapsed",
+                )
+                filter_lower = filter_text.strip().lower()
+
+                def _short_label(doc, system):
+                    """Strip redundant system prefix — already in group header."""
+                    prefix = f"{system} - "
+                    title = doc["document_title"]
+                    short = title[len(prefix):] if title.startswith(prefix) else title
+                    doc_type = f" · {doc['document_type']}" if doc.get("document_type") else ""
+                    rev = f" · {doc['revision']}" if doc.get("revision") else ""
+                    return f"{short}{doc_type}{rev}"
+
+                any_shown = False
                 for system, docs in library.items():
+                    visible_docs = [
+                        d for d in docs
+                        if not filter_lower
+                        or filter_lower in d["document_title"].lower()
+                        or filter_lower in _short_label(d, system).lower()
+                        or filter_lower in (d.get("document_type") or "").lower()
+                        or filter_lower in (d.get("revision") or "").lower()
+                    ]
+                    if not visible_docs:
+                        continue
+                    any_shown = True
                     st.markdown(f"**{system}**")
-                    for doc in docs:
-                        rev = f" · {doc['revision']}" if doc.get("revision") else ""
-                        doc_type = f" · {doc['document_type']}" if doc.get("document_type") else ""
-                        label = f"{doc['document_title']}{doc_type}{rev}"
+                    for doc in visible_docs:
+                        label = _short_label(doc, system)
                         safe_key = f"lib_{doc['document_title']}_{doc.get('document_type','')}_{doc.get('revision','')}".replace(" ", "_")
                         if st.button(label, key=safe_key, use_container_width=True):
                             # Fire a "show me" question for this document —
