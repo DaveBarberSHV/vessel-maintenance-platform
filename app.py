@@ -225,32 +225,28 @@ def render_safety_info(message: dict):
 
 
 def render_zoomable_image(url: str):
-    """Renders a page image with pinch-to-zoom support on mobile (Sept 2026).
-    Replaces st.image() which renders a static image with no zoom capability —
-    completely unreadable on a phone for drawings and wiring diagrams.
+    """Renders a page image with tap-to-open-full-size support (Sept 2026).
+    Replaces st.image() which renders a static image with no zoom capability.
 
-    Uses st.components.v1.html() to inject a real <img> tag with:
-    - touch-action: pinch-zoom — enables native pinch-to-zoom on iOS/Android
-    - max-width: 100% — fills the container without overflowing
-    - cursor: zoom-in — signals to desktop users the image is interactable
-    - overflow: auto on the wrapper — allows scrolling if zoomed past container
+    Approach: render the image inline at full container width, wrapped in an
+    anchor tag that opens the full-resolution image in a new browser tab on
+    tap/click. On mobile, the browser's native pinch-to-zoom then works on
+    the full image — more reliable than trying to enable pinch-to-zoom inside
+    Streamlit's iframe sandbox, which iOS Safari blocks by default.
 
-    Height is set to auto so portrait and landscape pages both render naturally.
-    The component iframe height (600px) is generous enough for most pages while
-    keeping the layout from being dominated by a single image."""
-    import streamlit.components.v1 as components
-    components.html(
-        f"""
-        <div style="overflow:auto; width:100%; max-height:600px;">
-          <img src="{url}"
-               style="width:100%; max-width:100%; height:auto;
-                      touch-action:pinch-zoom; cursor:zoom-in;
-                      display:block;"
-               loading="lazy" />
-        </div>
-        """,
-        height=600,
-        scrolling=True,
+    A small caption tells the user they can tap to zoom, so the affordance
+    is discoverable without any visual chrome on the image itself."""
+    st.markdown(
+        f'''<a href="{url}" target="_blank" rel="noopener noreferrer">
+  <img src="{url}"
+       style="width:100%; max-width:100%; height:auto; display:block;
+              cursor:zoom-in; border-radius:4px;"
+       loading="lazy" />
+</a>
+<p style="font-size:0.75em; color:gray; margin-top:2px;">
+  Tap image to open full size and zoom
+</p>''',
+        unsafe_allow_html=True,
     )
 
 
