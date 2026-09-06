@@ -500,16 +500,27 @@ with st.sidebar:
                     rev = f" · {doc['revision']}" if doc.get("revision") else ""
                     return f"{short}{rev}"
 
+                # Split filter into words so "Main Engine" matches
+                # "MainEngines" — each word must appear somewhere in the
+                # searchable text (title, short label, doc type, revision).
+                # A single-word filter works exactly as before (Sept 2026 fix).
+                filter_words = filter_lower.split() if filter_lower else []
+
+                def _matches_filter(doc, system):
+                    if not filter_words:
+                        return True
+                    searchable = " ".join([
+                        d["document_title"].lower(),
+                        _short_label(d, system).lower(),
+                        (d.get("document_type") or "").lower(),
+                        (d.get("revision") or "").lower(),
+                        system.lower(),
+                    ]).replace("_", " ")
+                    return all(w in searchable for w in filter_words)
+
                 any_shown = False
                 for system, docs in library.items():
-                    visible_docs = [
-                        d for d in docs
-                        if not filter_lower
-                        or filter_lower in d["document_title"].lower()
-                        or filter_lower in _short_label(d, system).lower()
-                        or filter_lower in (d.get("document_type") or "").lower()
-                        or filter_lower in (d.get("revision") or "").lower()
-                    ]
+                    visible_docs = [d for d in docs if _matches_filter(d, system)]
                     if not visible_docs:
                         continue
                     any_shown = True
