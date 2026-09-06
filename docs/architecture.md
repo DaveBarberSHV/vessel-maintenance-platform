@@ -323,10 +323,22 @@ completed first — see git history for that early build order):**
   answer, rather than buried in the collapsed Sources section. Missed
   detection falls back gracefully to Sources, never a false positive.
 - **Document library browsability panel** (Sept 2026) — a 📂 Document
-  Library expander in the sidebar lists all documents grouped by system.
-  Clicking any document fires a pre-formed "show me" question into the
-  chat, bypassing retrieval for navigation entirely. Solves the real gap
-  where semantic search reliably failed for drawing requests.
+  Library expander in the sidebar lists all documents grouped by system,
+  with a text filter box to narrow the list as you type. Clicking any
+  document fires a pre-formed "show me" question into the chat. Display
+  is capped at 5 pages to keep full manuals from overwhelming the UI —
+  drawings (typically 1–5 pages) display in full.
+- **Retrieval boost for drawing requests** (Sept 2026) — when a library
+  panel click fires a "Show me the {document_title}" question, the system
+  detects the showing-language + exact title match and bypasses semantic
+  search entirely, fetching that document's chunks directly by title.
+  Deterministic, not language-dependent. Falls through to normal semantic
+  search for all other questions.
+- **Tap-to-zoom images on mobile** (Sept 2026) — all page images are
+  wrapped in an anchor tag that opens the full-resolution image in a new
+  browser tab on tap. iOS Safari's native pinch-to-zoom works there,
+  making drawings and wiring diagrams readable on a phone. Replaced
+  `st.image()` across the entire app with `render_zoomable_image()`.
 
 ## Diagnostic tooling (repo root, run locally — not part of the deployed app)
 
@@ -385,12 +397,7 @@ vs. reasoning miss — rather than guessing.
   see above). The one remaining open piece: wide engineering sheets that
   exceed Claude's vision API 8000px limit. Tiling into higher-resolution
   sections is scoped but not yet built — see `BACKLOG.md`.
-- **Retrieval boost for drawing requests** — when a question contains
-  genuine "show me" language plus a known document title from the
-  inventory, inject that document's chunks directly rather than relying
-  on semantic search, which reliably fails for drawings (shaft component
-  content from manuals scores higher than the actual drawing). Scoped
-  Sept 2026 — see `BACKLOG.md`.
+- **Retrieval boost for drawing requests** — ✅ built Sept 2026; see Major features above.
 - Anything supporting more than one vessel
 - A second, inline entry point for Engineer Notes (attached to a
   specific answer, pre-filled from its equipment context) — deliberately
@@ -405,6 +412,10 @@ vs. reasoning miss — rather than guessing.
   table in `answer_query.py` alongside temperature/pressure
 - Equipment dropdown scaling — ✅ resolved Sept 2026 via explicit `system`
   field; see the resolved entry in `BACKLOG.md`
+- Retrieval boost for drawing requests — ✅ built Sept 2026; direct title fetch
+  bypasses semantic search for library panel clicks
+- Tap-to-zoom images on mobile — ✅ built Sept 2026; `render_zoomable_image()`
+  replaces `st.image()` across the app
 - Document library browsability panel — ✅ built Sept 2026; engineers can
   browse all documents by system in the sidebar and click to view any
   document directly, bypassing retrieval for navigation

@@ -3,9 +3,37 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ RESOLVED — Mobile image zoom (Sept 2026)
+
+**Problem:** `st.image()` renders static images with no zoom capability —
+drawings and wiring diagrams completely unreadable on a phone. iOS Safari
+blocks pinch-to-zoom inside Streamlit's iframe sandbox.
+
+**Fix:** Replaced all `st.image()` calls with `render_zoomable_image()` —
+wraps the image in an anchor tag that opens the full-resolution image in
+a new browser tab on tap. Native browser pinch-to-zoom works there.
+Also added "Tap image to open full size and zoom" caption for discoverability.
+
 ---
 
-## 🔲 Retrieval boost for drawing requests — next priority (Sept 2026)
+## ✅ RESOLVED — Document library filter and 5-page display cap (Sept 2026)
+
+**Filter:** Added a text filter box at the top of the 📂 Document Library
+panel. Typing narrows the list in real time (on Enter) — essential as the
+library grows toward 270 documents.
+
+**5-page cap:** Library panel clicks on full manuals were surfacing 13+
+page images in sequence — unusable. Capped display at 5 pages with a
+caption directing engineers to ask a specific question for longer documents.
+Drawings (typically 1–5 pages) are unaffected.
+
+**Label cleanup:** Stripped the redundant system prefix from document
+button labels (already shown in the group header) and removed the
+doc_type from labels (already embedded in the title).
+
+---
+
+## ✅ RESOLVED — Retrieval boost for drawing requests (Sept 2026)
 
 **What:** When a question contains genuine "show me" language plus a
 known document title fragment from the inventory, bypass semantic search
@@ -35,7 +63,7 @@ needed: `"Show me the {document_title}"`.
 
 ---
 
-## 🔲 Document library panel — two small follow-on items (Sept 2026)
+## ✅ RESOLVED — Document library panel follow-on items (Sept 2026)
 
 **1. Verbose button labels.** Each document button currently shows the
 full `document_title` (e.g. "AzimuthThruster - BergPropulsion MTA O&M
