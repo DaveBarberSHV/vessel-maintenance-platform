@@ -451,13 +451,16 @@ with st.sidebar:
                 filter_lower = filter_text.strip().lower()
 
                 def _short_label(doc, system):
-                    """Strip redundant system prefix — already in group header."""
+                    """Strip system prefix — already in group header. Doc type
+                    is also already embedded in the title so we omit it from
+                    the label to avoid duplication. Only revision is appended
+                    since that's the one piece of useful context not in the
+                    title itself."""
                     prefix = f"{system} - "
                     title = doc["document_title"]
                     short = title[len(prefix):] if title.startswith(prefix) else title
-                    doc_type = f" · {doc['document_type']}" if doc.get("document_type") else ""
                     rev = f" · {doc['revision']}" if doc.get("revision") else ""
-                    return f"{short}{doc_type}{rev}"
+                    return f"{short}{rev}"
 
                 any_shown = False
                 for system, docs in library.items():
