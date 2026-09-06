@@ -224,6 +224,36 @@ def render_safety_info(message: dict):
         st.markdown(safety_info)
 
 
+def render_zoomable_image(url: str):
+    """Renders a page image with pinch-to-zoom support on mobile (Sept 2026).
+    Replaces st.image() which renders a static image with no zoom capability —
+    completely unreadable on a phone for drawings and wiring diagrams.
+
+    Uses st.components.v1.html() to inject a real <img> tag with:
+    - touch-action: pinch-zoom — enables native pinch-to-zoom on iOS/Android
+    - max-width: 100% — fills the container without overflowing
+    - cursor: zoom-in — signals to desktop users the image is interactable
+    - overflow: auto on the wrapper — allows scrolling if zoomed past container
+
+    Height is set to auto so portrait and landscape pages both render naturally.
+    The component iframe height (600px) is generous enough for most pages while
+    keeping the layout from being dominated by a single image."""
+    import streamlit.components.v1 as components
+    components.html(
+        f"""
+        <div style="overflow:auto; width:100%; max-height:600px;">
+          <img src="{url}"
+               style="width:100%; max-width:100%; height:auto;
+                      touch-action:pinch-zoom; cursor:zoom-in;
+                      display:block;"
+               loading="lazy" />
+        </div>
+        """,
+        height=600,
+        scrolling=True,
+    )
+
+
 def render_show_document_images(message: dict):
     """Auto-surfaces the specific drawing/page a question explicitly
     asked to be SHOWN (Sept 2026, real request from Dave: "Can you show
@@ -252,7 +282,7 @@ def render_show_document_images(message: dict):
         total = img.get("total_pages")
         page_label = f'p. {img["page_number"]} of {total}' if total else f'p. {img["page_number"]}'
         st.markdown(f'**{img["document_title"]}, {page_label}**')
-        st.image(img["url"])
+        render_zoomable_image(img["url"])
     if len(images) > MAX_DISPLAY:
         remaining = len(images) - MAX_DISPLAY
         st.caption(
@@ -293,7 +323,7 @@ def render_sources(chunks: list[dict] | None):
             st.markdown(f'**{m["document_title"]}, {m["revision"]}, {page_label}**')
             url = m.get("page_image_url")
             if url:
-                st.image(url)
+                render_zoomable_image(url)
             if i < len(entries) - 1:
                 st.divider()
 
