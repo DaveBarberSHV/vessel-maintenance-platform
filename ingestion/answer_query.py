@@ -417,7 +417,7 @@ def find_matching_document_title(question: str) -> str | None:
     return None
 
 
-def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
+def get_answer(question: str, engine: str = "voyage", top_k: int = 10,
                api_key: str | None = None, previous_exchange: dict | None = None) -> dict:
     """The importable core of this module — used by both the CLI below and
     the Streamlit front end. Returns a dict rather than printing, and

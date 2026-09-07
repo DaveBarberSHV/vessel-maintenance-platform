@@ -137,6 +137,43 @@ is working.
 
 ---
 
+---
+
+## Fleet scaling vision (captured Sept 2026)
+
+The long-term target is the McAllister fleet — approximately 60 vessels.
+The Polaris prototype proves the concept; the architecture and support
+model need to be right before scaling.
+
+**Vessel onboarding process (target model):**
+1. Gather and ingest all relevant documents for the vessel
+2. 2-3 day coaching session onboard — get the crew comfortable, capture
+   Engineer Notes from experienced engineers while they're together
+3. Designated vessel admin (Chief Engineer or Port Engineer) takes over
+   ongoing management via a self-service admin panel
+
+**Self-service requirements before scaling:**
+- Admin panel (web UI) for adding/removing users, approving/editing
+  Engineer Notes, and managing documents — no Terminal access required
+- Document ingestion triggered from the admin panel or automatically
+  from Drive, not requiring Dave's involvement
+- Multi-vessel data isolation — vessel_id RLS at the database level so
+  no vessel can see another's data
+
+**Support model:**
+- Ticket-based, not phone-based — email or form, nothing that rings
+- 1 business day SLA stated plainly in contracts
+- App and admin panel designed for self-service so routine tasks never
+  become support requests
+- McAllister's engineers are familiar with OEM support models that
+  already work this way
+
+**Required before vessel #2:**
+Multi-vessel architecture (vessel_id isolation) and the admin panel
+must be built before any second vessel onboards. Skipping this means
+every user addition and document question goes to Dave personally —
+unmanageable at 60 vessels. See `BACKLOG.md` for full technical scope.
+
 ## Open items for the Jared conversation (September 2026)
 
 - Tug-only scope, barge out of v1 — **agreed**

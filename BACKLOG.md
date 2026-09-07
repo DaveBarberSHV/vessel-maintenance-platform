@@ -22,6 +22,97 @@ the command structure (with `"..."` placeholders) here for reference.
 
 ---
 
+## 🔲 Fleet scaling architecture — required before vessel #2 (Sept 2026)
+
+This is the foundational work that must happen before any second vessel
+onboards. The business model depends on getting this right — rushing it
+creates a support headache that scales with every new vessel added.
+
+### The core constraint: everything is currently single-vessel
+
+The entire database, document library, Engineer Notes, conversation
+history, and user accounts are in one shared Supabase project with no
+vessel-level data isolation. A Chief Engineer on a second vessel must
+not be able to see another vessel's Engineer Notes, conversation
+history, or documents. This is a security requirement, not a feature.
+
+### What needs to be built before vessel #2
+
+**1. Multi-vessel data isolation (foundational — build first)**
+Every table needs a `vessel_id` column and RLS policies that enforce
+vessel boundaries at the database level. This includes `tm_chunks`,
+`messages`, `conversations`, `engineer_notes`, and `users`. The
+ingestion pipeline needs to tag every chunk with a vessel_id. The app
+needs to scope all queries to the current user's vessel.
+
+Options to evaluate:
+- One Supabase project per vessel (clean isolation, higher cost at scale)
+- One project with vessel_id RLS (cheaper, more complex, harder to audit)
+- Hybrid: shared infrastructure, per-vessel schemas
+
+Decision needs to be made before writing any code — it affects
+everything downstream.
+
+**2. Admin panel (web UI, not Terminal)**
+A designated vessel admin (Chief Engineer or Port Engineer) needs to
+manage their own vessel without technical knowledge or Dave's involvement:
+- Add/remove users (currently requires manage_users.py in Terminal)
+- Review, approve, edit, and remove Engineer Notes
+- View document library status (what's ingested, what's missing)
+- Trigger document ingestion for new uploads (web UI over Terminal)
+
+This removes the entire category of "please add so-and-so" support
+requests before they ever reach Dave.
+
+**3. Document ingestion self-service**
+The vision-assisted rename pipeline (Sept 2026) is the right foundation.
+Next step: a web UI where an admin uploads a PDF, sees the proposed name
+from vision extraction, approves or edits it, and triggers ingestion —
+no Terminal required. Could also be triggered automatically when a new
+file appears in the vessel's Drive folder (requires a Drive webhook or
+polling integration).
+
+**4. Ticket-based support model (not phone-based)**
+Design the app and admin panel to minimize support requests:
+- In-app help text on every admin action so routine tasks are self-service
+- A feedback/support button that creates a logged ticket (email or form),
+  not a phone number
+- Clear in-app messaging about what the system does and doesn't do
+- SLA stated plainly in the contract: "support requests answered within
+  1 business day" — not "call anytime"
+- McAllister's engineers are used to OEM support models that already
+  work this way (Berg Propulsion's own manual mentions a 24h emergency
+  line as a premium thing, not a default)
+
+### Vessel onboarding process (target model)
+
+1. Dave gathers and ingests all relevant documents for the vessel
+2. 2-3 day coaching session onboard: get the team comfortable with the
+   app, capture as many Engineer Notes as possible from the crew
+3. Designated vessel admin (Chief Engineer or Port Engineer) takes over:
+   - Add/remove users via admin panel
+   - Monitor and approve Engineer Notes
+   - Add new documents over time via self-service ingestion
+4. Dave available for support via ticket system (1 business day SLA)
+
+### Timeline estimate
+
+- **Now through Polaris rollout:** finish current prototype, prove Q&A
+  core works reliably with Jared's team. This is the reference case.
+- **After Polaris rollout:** build multi-vessel architecture and admin
+  panel before approaching vessel #2. Estimate 3-4 focused sessions.
+- **Each new vessel:** onboarding process above, fully self-service
+  ongoing management.
+
+### Why this order matters
+
+Skipping the admin panel and going straight to vessel #2 means every
+user addition, Note removal, and document question goes to Dave
+personally. At 60 vessels that's an unmanageable support load. Build
+the self-service infrastructure once, correctly, before scaling.
+
+---
+
 ## 🔜 TOMORROW — Re-ingest all DWG files with tiled vision extraction
 
 Tiled vision extraction is built and committed (Sept 2026). Existing DWG

@@ -19,7 +19,7 @@ if not db_url:
 conn = psycopg2.connect(db_url)
 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
     cur.execute("""
-        SELECT id, author, author_role, category, equipment_model,
+        SELECT id, author, author_role, category,
                position, note_text, created_at
         FROM engineer_notes
         ORDER BY created_at DESC
@@ -38,8 +38,6 @@ for row in rows:
     print(f"Date:      {row['created_at']}")
     print(f"Author:    {row['author']}" + (f" ({row['author_role']})" if row['author_role'] else ""))
     print(f"Category:  {row['category']}")
-    if row.get('equipment_model'):
-        print(f"Equipment: {row['equipment_model']}")
     if row.get('position'):
         print(f"Position:  {row['position']}")
     print(f"Note:\n{row['note_text']}")
