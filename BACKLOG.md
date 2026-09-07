@@ -3,6 +3,36 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## 🔜 TOMORROW — Re-ingest all DWG files with tiled vision extraction
+
+Tiled vision extraction is built and committed (Sept 2026). Existing DWG
+files were ingested with the old single-image approach and need to be
+re-processed. This is the top priority for the next session.
+
+**Steps (from the ingestion/ directory, all env vars exported):**
+
+1. Queue all DWG files for reprocessing:
+   `python3.14 reprocess_all_dwg.py`
+
+2. Run the full ingest:
+   `python3.14 scan_folder.py "/Users/davebarber/Library/CloudStorage/GoogleDrive-.../Vessel Maintenance System Documents"`
+
+3. Watch the output — DWG files should now show tile counts
+   (e.g. "4 tiles" for an A1 drawing) instead of single-image extraction.
+
+4. After ingest, test the previously-failing questions:
+   - "I need to order a new main fuel transfer pump" (Jared thumbs-down)
+   - "Can you find where L3-32 and T-6 are shown on a drawing"
+   - "Can you show me the Harrington Hand Chain Hoist?"
+
+**Also tomorrow:**
+- Add new users (Jared's testing group) — use manage_users.py
+- Add GeneralKnowledge system to Drive and ingest the first documents
+- Address partial title match retrieval boost (#6, #7, #12 pattern)
+- Admin UI for removing/editing Engineer Notes
+
+---
+
 ## ✅ RESOLVED — Mobile image zoom (Sept 2026)
 
 **Problem:** `st.image()` renders static images with no zoom capability —
@@ -526,7 +556,7 @@ at the end of a long investigative session. Dave's explicit call.
 
 ---
 
-## ✅ RESOLVED (for normal pages) / 🔲 OPEN (for large-format drawings) — Vision extraction for image-only pages
+## ✅ RESOLVED — Vision extraction for image-only pages, including large-format drawings (Sept 2026)
 
 **What:** Real, high-priority request from Dave: drawings, wiring
 diagrams, and dense control-panel screenshots often have NO text layer at
