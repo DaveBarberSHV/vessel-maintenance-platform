@@ -254,8 +254,118 @@ def propose_name(filename: str) -> dict:
         result["notes"] = "inferred from description — verify Rev"
         return result
 
-    result["notes"] = "COULD_NOT_PARSE — manual rename needed"
+    result["notes"] = "COULD_NOT_PARSE — trying vision extraction..."
     return result
+
+
+def propose_name_via_vision(filename: str, folder: Path) -> dict | None:
+    """Fallback for filenames that can't be parsed from the name alone.
+    Sends the first page of the PDF to Claude's vision API and asks it
+    to extract the key naming fields directly from the document's title
+    block or cover page (Sept 2026).
+
+    Real motivating case: vendor docs with generic names like
+    'CA126651 - NB 469 - ICCP Minitek Installation Manual.pdf' or
+    'CAT COOLANT DEAC.pdf' — the filename alone doesn't contain enough
+    structured information to propose a reliable name, but the document's
+    own title block almost always does.
+
+    Returns a propose_name()-compatible dict on success, or None if
+    vision extraction fails or the API key isn't available. The caller
+    falls back to MANUAL RENAME NEEDED if None is returned."""
+    import base64
+    import anthropic
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+
+    pdf_path = next(folder.rglob(filename), None)
+    if not pdf_path or not pdf_path.exists():
+        return None
+
+    try:
+        import pdfplumber
+        from io import BytesIO
+        with pdfplumber.open(pdf_path) as pdf:
+            if not pdf.pages:
+                return None
+            page = pdf.pages[0]
+            im = page.to_image(resolution=150)
+            buf = BytesIO()
+            im.save(buf, format="PNG")
+            image_b64 = base64.standard_b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+    prompt = """You are helping rename a marine vessel technical document to follow
+a strict naming convention: System_Manufacturer_Model_DocType_Rev.pdf
+
+Valid Systems: GeneralArrangement, Hull, Electrical, MainEngines, Drivetrain,
+AzimuthThruster, FuelOil, Piping, Stability, Hydraulics, Steering,
+CompressedAir, FireSuppression, HVAC, Bilge, Genset, MainSwitchboard,
+PropulsionControl, Clutch, Tonnage, GeneralKnowledge
+
+Valid DocTypes: OMM (operation & maintenance manual), DWG (drawing/schematic),
+PARTSLIST, REFDATA (reference data/datasheet), CALCS, SDS (safety data sheet)
+
+Look at this document's title block or cover page and extract:
+1. System (pick the closest match from the valid list)
+2. Manufacturer (short name, no spaces, e.g. CAT, BergPropulsion, Cathelco)
+3. Model (alphanumeric, no spaces, e.g. 3512E, ICCPMinitek, MMB304S)
+4. DocType (pick from the valid list)
+5. Rev (e.g. Rev1, Rev0, RevUnknown if not shown)
+
+Respond ONLY with a JSON object like:
+{"system": "MainEngines", "manufacturer": "CAT", "model": "CoolantDEAC",
+ "doctype": "SDS", "rev": "Rev1", "confidence": "high"}
+
+Set confidence to "high" if clearly readable, "low" if guessing.
+If you cannot determine the fields reliably, respond with {"confidence": "none"}"""
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=200,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {
+                        "type": "base64", "media_type": "image/png",
+                        "data": image_b64}},
+                    {"type": "text", "text": prompt}
+                ]
+            }]
+        )
+        import json
+        text = response.content[0].text.strip()
+        # Strip markdown fences if present
+        text = re.sub(r'^```[a-z]*\n?', '', text).rstrip('`').strip()
+        data = json.loads(text)
+    except Exception:
+        return None
+
+    if data.get("confidence") == "none":
+        return None
+
+    sys = data.get("system", "")
+    mfr = data.get("manufacturer", "")
+    model = data.get("model", "")
+    doctype = data.get("doctype", "DWG")
+    rev = data.get("rev", "Rev1")
+    confidence = data.get("confidence", "low")
+
+    if not all([sys, mfr, model]):
+        return None
+
+    proposed = f"{sys}_{mfr}_{model}_{doctype}_{rev}.pdf"
+    return {
+        "original": filename,
+        "proposed": proposed,
+        "system": sys,
+        "notes": f"vision-extracted (confidence: {confidence}) — please verify",
+    }
 
 
 def run(folder_path: str):
@@ -280,6 +390,19 @@ def run(folder_path: str):
         result = propose_name(filename)
         proposed = result["proposed"]
         notes = result["notes"]
+
+        # Vision fallback — when filename parsing fails, try reading the
+        # document's own title block via Claude's vision API (Sept 2026).
+        if "COULD_NOT_PARSE" in notes and os.environ.get("ANTHROPIC_API_KEY"):
+            print(f"  Trying vision extraction for: {filename}")
+            vision_result = propose_name_via_vision(filename, folder)
+            if vision_result:
+                proposed = vision_result["proposed"]
+                result["proposed"] = proposed
+                result["system"] = vision_result["system"]
+                notes = vision_result["notes"]
+            else:
+                notes = "COULD_NOT_PARSE — manual rename needed"
 
         # Duplicate detection: does the proposed name match something
         # already ingested, or does the drawing code appear in an already-
