@@ -494,7 +494,7 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 5,
     # drawings. Falls through to normal retrieval if no title match is found.
     matched_title = find_matching_document_title(question)
     if matched_title:
-        chunks = fetch_chunks_by_title(matched_title, top_k=15)
+        chunks = fetch_chunks_by_title(matched_title, top_k=8)
     else:
         chunks = query_chunks(search_query, engine=engine, top_k=top_k)
         chunks = add_exact_code_matches(question, chunks)

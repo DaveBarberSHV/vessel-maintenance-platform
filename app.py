@@ -312,16 +312,32 @@ def render_sources(chunks: list[dict] | None):
             continue
         seen.add(key)
         entries.append(m)
-    with st.expander(f"📚 View Sources ({len(entries)})"):
-        for i, m in enumerate(entries):
+    # Cap sources displayed at 10 — same pattern as the 5-page image cap.
+    # A question spanning many drawing sheets can return 15-18 sources;
+    # showing all with images would make the page unusably long. The
+    # expander label always shows the true total so nothing is hidden
+    # from the user — they just need to ask a more specific question to
+    # get fewer, more targeted results (Sept 2026).
+    MAX_SOURCES = 10
+    display_entries = entries[:MAX_SOURCES]
+    label = (f"📚 View Sources ({len(entries)})"
+             if len(entries) <= MAX_SOURCES
+             else f"📚 View Sources (showing {MAX_SOURCES} of {len(entries)})")
+    with st.expander(label):
+        for i, m in enumerate(display_entries):
             total = m.get("total_pages")
             page_label = f'p. {m["page_number"]} of {total}' if total else f'p. {m["page_number"]}'
             st.markdown(f'**{m["document_title"]}, {m["revision"]}, {page_label}**')
             url = m.get("page_image_url")
             if url:
                 render_zoomable_image(url)
-            if i < len(entries) - 1:
+            if i < len(display_entries) - 1:
                 st.divider()
+        if len(entries) > MAX_SOURCES:
+            st.caption(
+                f"Showing {MAX_SOURCES} of {len(entries)} sources. "
+                f"Ask a more specific question to narrow the results."
+            )
 
 
 def render_assistant_message(message: dict, key_prefix: str):
