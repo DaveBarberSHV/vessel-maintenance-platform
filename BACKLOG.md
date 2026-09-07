@@ -3,6 +3,25 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## 🔺 IMMEDIATE — Rotate SUPABASE_DB_URL password (Sept 2026)
+
+**What happened:** The full `SUPABASE_DB_URL` connection string (including
+password) was pasted into a Claude chat session on Sept 7, 2026. While
+Anthropic does not store or use conversation data maliciously, credentials
+in chat logs are a security risk and should be treated as compromised.
+
+**Action required before the demo:**
+1. Go to Supabase → Settings → Database → Reset database password
+2. Update the new password in `.streamlit/secrets.toml` on your local machine
+3. Update the Streamlit Cloud secrets (app settings → Secrets)
+4. Re-export the new `SUPABASE_DB_URL` in any open Terminal sessions
+
+**Standing rule:** Never paste credentials into chat. Use the export
+command in Terminal with the value filled in locally, then paste only
+the command structure (with `"..."` placeholders) here for reference.
+
+---
+
 ## 🔜 TOMORROW — Re-ingest all DWG files with tiled vision extraction
 
 Tiled vision extraction is built and committed (Sept 2026). Existing DWG
