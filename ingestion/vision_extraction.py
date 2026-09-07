@@ -111,6 +111,40 @@ def extract_text_from_image(image_bytes: bytes, media_type: str = "image/png",
 VISION_TRANSCRIPT_MARKER = "[AI-transcribed from a drawing/image — no native text layer on this page]"
 
 
+def extract_text_from_tiled_page(tile_bytes_list: list[bytes],
+                                   api_key: str | None = None) -> str:
+    """Extracts text from a large-format page rendered as overlapping tiles
+    (Sept 2026, see page_images.tile_page_for_vision() and BACKLOG.md).
+
+    Calls extract_text_from_image() on each tile, then combines the results
+    into a single transcription. Duplicate text in overlap zones is acceptable
+    — it's better to have minor redundancy than to miss text at a tile boundary,
+    and the embedding treats the combined text as one chunk anyway.
+
+    A single-tile list (normal-format page) passes through to
+    extract_text_from_image() unchanged — same behavior as before tiling.
+
+    Tile order is preserved (left-to-right, top-to-bottom) so the combined
+    text flows in roughly the same spatial order as the drawing itself,
+    which helps retrieval since related labels appear near each other."""
+    if not tile_bytes_list:
+        return ""
+
+    if len(tile_bytes_list) == 1:
+        return extract_text_from_image(tile_bytes_list[0], api_key=api_key)
+
+    tile_texts = []
+    for i, tile_bytes in enumerate(tile_bytes_list, start=1):
+        text = extract_text_from_image(tile_bytes, api_key=api_key)
+        if text:
+            tile_texts.append(f"[Tile {i} of {len(tile_bytes_list)}]\n{text}")
+
+    return "\n\n".join(tile_texts) if tile_texts else ""
+
+
+
+
+
 def format_vision_chunk_text(transcribed_text: str) -> str:
     """Wraps vision-transcribed text with a clear marker before it enters
     the normal chunk/embed/retrieve pipeline (Aug 2026). Deliberately a

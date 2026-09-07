@@ -186,6 +186,73 @@ def upload_page_image(image_bytes: bytes, source_file: str, page_number: int) ->
     return public_url(source_file, page_number)
 
 
+def tile_page_for_vision(pdf_path: Path, page_number: int,
+                          target_dpi: int = 300,
+                          overlap: float = 0.15) -> list[bytes]:
+    """Renders a large-format page as overlapping tiles at full resolution
+    for vision extraction (Sept 2026, see BACKLOG.md).
+
+    Real motivating case: A1-format engineering drawings (shaft arrangements,
+    electrical equipment plans, piping schematics) rendered at their clamped
+    DPI produce images where small text — equipment labels, manufacturer
+    names, part numbers, valve tags — is illegible even to Claude's vision
+    API. The fix: render each tile region at full 300 DPI within the 8000px
+    limit, extract text from each tile separately, then combine.
+
+    Tiles overlap by `overlap` fraction (default 15%) so text straddling a
+    tile boundary is caught by at least one tile. A normal-format page
+    (letter, A4) produces a single tile identical to the existing behavior.
+
+    Returns a list of PNG bytes, one per tile, in left-to-right,
+    top-to-bottom order. Each tile is guaranteed to fit within
+    MAX_IMAGE_DIMENSION_PX on both dimensions at target_dpi.
+
+    Uses pdfplumber's crop() to extract exact page regions before
+    rendering — more accurate than cropping a rendered image, and
+    preserves full PDF vector quality within each tile."""
+    import math
+    from io import BytesIO
+
+    with pdfplumber.open(pdf_path) as pdf:
+        page = pdf.pages[page_number - 1]
+        w_pts = page.width
+        h_pts = page.height
+
+    # How many tiles in each dimension at target_dpi?
+    w_px = w_pts / 72 * target_dpi
+    h_px = h_pts / 72 * target_dpi
+    tiles_x = max(1, math.ceil(w_px / (MAX_IMAGE_DIMENSION_PX * (1 - overlap))))
+    tiles_y = max(1, math.ceil(h_px / (MAX_IMAGE_DIMENSION_PX * (1 - overlap))))
+
+    if tiles_x == 1 and tiles_y == 1:
+        # Page fits at full resolution — no tiling needed, return single image
+        return [render_page_image(pdf_path, page_number, resolution=target_dpi)]
+
+    # Tile step size in points (with overlap)
+    step_x = w_pts / tiles_x
+    step_y = h_pts / tiles_y
+    tile_w = step_x * (1 + overlap)  # each tile is step + overlap wide
+    tile_h = step_y * (1 + overlap)
+
+    tiles = []
+    with pdfplumber.open(pdf_path) as pdf:
+        page = pdf.pages[page_number - 1]
+        for row in range(tiles_y):
+            for col in range(tiles_x):
+                x0 = max(0.0, col * step_x - (overlap / 2) * step_x)
+                y0 = max(0.0, row * step_y - (overlap / 2) * step_y)
+                x1 = min(w_pts, x0 + tile_w)
+                y1 = min(h_pts, y0 + tile_h)
+
+                cropped = page.crop((x0, y0, x1, y1))
+                im = cropped.to_image(resolution=target_dpi)
+                buf = BytesIO()
+                im.save(buf, format="PNG")
+                tiles.append(buf.getvalue())
+
+    return tiles
+
+
 def render_and_upload_selected_pages(pdf_path: Path, source_file: str,
                                       pages_with_text: set[int], total_pages: int) -> dict[int, str]:
     """Main entry point — renders and uploads every page that

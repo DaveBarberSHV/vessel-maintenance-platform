@@ -508,16 +508,20 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                       f"trying vision extraction...")
                 for page_number, chunks_for_page in pages_needing_vision.items():
                     try:
-                        # Higher resolution than the citation-display
-                        # default (Aug 2026, see page_images.py) — this
-                        # image is only used transiently for the vision
-                        # call, never stored, so there's no cost to
-                        # rendering it sharper. Confirmed necessary by a
-                        # real test: a dense rotation-direction table was
-                        # genuinely unreadable at the default resolution.
-                        image_bytes = page_images.render_page_image(
-                            path, page_number, resolution=300)
-                        transcribed = vision_extraction.extract_text_from_image(image_bytes)
+                        # Tiled vision extraction for large-format drawings
+                        # (Sept 2026, see page_images.tile_page_for_vision()
+                        # and BACKLOG.md). Large-format drawings (A1, A0)
+                        # are clamped below readable DPI when rendered as a
+                        # single image — equipment labels, manufacturer names,
+                        # and part numbers become illegible. Tiling renders
+                        # each region at full 300 DPI within the 8000px limit,
+                        # then combines the tile transcriptions into one chunk.
+                        # Normal-format pages produce a single tile and behave
+                        # identically to the previous single-image approach.
+                        tiles = page_images.tile_page_for_vision(
+                            path, page_number, target_dpi=300)
+                        transcribed = vision_extraction.extract_text_from_tiled_page(
+                            tiles)
                         if transcribed:
                             formatted = vision_extraction.format_vision_chunk_text(transcribed)
                             for c in chunks_for_page:
