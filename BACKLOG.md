@@ -22,6 +22,39 @@ the command structure (with `"..."` placeholders) here for reference.
 
 ---
 
+## 🔲 Chief Engineer approval step in rename workflow (Sept 2026)
+
+**What:** The current rename flow is Dave-reviews-and-approves. The
+Danfoss VFD manual was correctly named from its title block
+(`Electrical_Danfoss_...`) but Jared correctly identified it as HVAC —
+a judgment call the title block alone can't make reliably. The rename
+had to be undone and the document re-ingested.
+
+**Interim fix:** Share `rename_proposals.csv` with Jared before applying
+any renames for vendor docs where system assignment is ambiguous.
+
+**Proper fix:** Admin panel where the vessel admin sees proposed names,
+edits them, and approves before ingestion — part of the fleet scaling
+architecture.
+
+---
+
+## 🔲 Rename a document without full re-ingest (Sept 2026)
+
+**What:** When a document moves to a different system, the only current
+path is reprocess + re-ingest. For text-layer PDFs this is minutes. For
+large image-only PDFs this could be hours.
+
+**Better approach:** A `rename_document.py` script that updates
+`document_title`, `source_file`, and `equipment_model` in the database
+directly for all chunks belonging to that document — no re-embedding,
+no vision extraction. The content doesn't change, only the metadata.
+
+**Why deferred:** Low frequency — happened once. Build it when it becomes
+recurring or when large image-only documents make re-ingest painful.
+
+---
+
 ## 🔲 Fleet scaling architecture — required before vessel #2 (Sept 2026)
 
 This is the foundational work that must happen before any second vessel
