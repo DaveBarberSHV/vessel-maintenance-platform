@@ -46,6 +46,15 @@ from retrieval import (VoyageEmbedder, get_voyage_key, get_pg_connection,
                         ensure_pg_schema, upsert_chunks, delete_chunks)
 
 MANIFEST_PATH = Path(__file__).parent / "manifest.json"
+
+# Files to permanently skip regardless of what appears in the scan folder.
+# Add filenames here when a file has been superseded, is corrupted, or
+# should never be processed (e.g. old scanned versions replaced by
+# text-layer PDFs). The scanner will silently skip these — they won't
+# appear in unmatched or invalid counts (Sept 2026).
+SKIP_FILES: set[str] = {
+    "Electrical_Danfoss_VACON100FLOW_OMM_RevUnknown.pdf",  # replaced by Rev1 text-layer PDF
+}
 CHUNKS_PATH = Path(__file__).parent / "chunks.jsonl"
 
 # Single-vessel prototype — same for every file. If a second vessel is
@@ -278,6 +287,8 @@ def scan_folder(folder: Path, engine: str = "voyage"):
     hash_to_prior_filename = {entry["hash"]: fname for fname, entry in manifest.items()}
 
     for path in pdf_files:
+        if path.name in SKIP_FILES:
+            continue
         metadata = parse_filename(path.name)
         if metadata is None:
             unmatched.append(path.name)

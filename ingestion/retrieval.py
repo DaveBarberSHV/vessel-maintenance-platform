@@ -217,43 +217,54 @@ def _vec_literal(embedding: list) -> str:
     return "[" + ",".join(str(x) for x in embedding) + "]"
 
 
-def upsert_chunks(conn, chunks: list[dict], embeddings: list[list[float]]):
+def upsert_chunks(conn, chunks: list[dict], embeddings: list[list[float]],
+                  batch_size: int = 100):
     """Bulk insert-or-update by chunk_id — safe to call repeatedly (e.g. a
-    full rebuild, or scan_folder.py re-adding a changed file's chunks)."""
-    rows = [
-        (
-            c["chunk_id"], c["text"], _vec_literal(emb),
-            c["document_title"], c["revision"], c["page_number"],
-            c.get("total_pages"), c["equipment_model"], c["document_type"],
-            c["source_file"], c.get("page_image_url"),
-        )
-        for c, emb in zip(chunks, embeddings)
-    ]
-    with conn.cursor() as cur:
-        psycopg2.extras.execute_values(
-            cur,
-            f"""
-            INSERT INTO {PG_TABLE}
-                (chunk_id, text, embedding, document_title, revision,
-                 page_number, total_pages, equipment_model, document_type,
-                 source_file, page_image_url)
-            VALUES %s
-            ON CONFLICT (chunk_id) DO UPDATE SET
-                text = EXCLUDED.text,
-                embedding = EXCLUDED.embedding,
-                document_title = EXCLUDED.document_title,
-                revision = EXCLUDED.revision,
-                page_number = EXCLUDED.page_number,
-                total_pages = EXCLUDED.total_pages,
-                equipment_model = EXCLUDED.equipment_model,
-                document_type = EXCLUDED.document_type,
-                source_file = EXCLUDED.source_file,
-                page_image_url = EXCLUDED.page_image_url
-            """,
-            rows,
-            template="(%s, %s, %s::vector, %s, %s, %s, %s, %s, %s, %s, %s)",
-        )
-    conn.commit()
+    full rebuild, or scan_folder.py re-adding a changed file's chunks).
+
+    Writes in batches of `batch_size` (default 100) to avoid Supabase
+    connection timeouts on large documents (Sept 2026 fix — the Danfoss
+    VACON100FLOW manual generates 784 chunks, which as a single transaction
+    reliably caused 'server closed the connection unexpectedly' errors).
+    Each batch is committed independently so a failure mid-way through a
+    large document loses at most one batch rather than the whole file."""
+    for batch_start in range(0, len(chunks), batch_size):
+        batch_chunks = chunks[batch_start:batch_start + batch_size]
+        batch_embeddings = embeddings[batch_start:batch_start + batch_size]
+        rows = [
+            (
+                c["chunk_id"], c["text"], _vec_literal(emb),
+                c["document_title"], c["revision"], c["page_number"],
+                c.get("total_pages"), c["equipment_model"], c["document_type"],
+                c["source_file"], c.get("page_image_url"),
+            )
+            for c, emb in zip(batch_chunks, batch_embeddings)
+        ]
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_values(
+                cur,
+                f"""
+                INSERT INTO {PG_TABLE}
+                    (chunk_id, text, embedding, document_title, revision,
+                     page_number, total_pages, equipment_model, document_type,
+                     source_file, page_image_url)
+                VALUES %s
+                ON CONFLICT (chunk_id) DO UPDATE SET
+                    text = EXCLUDED.text,
+                    embedding = EXCLUDED.embedding,
+                    document_title = EXCLUDED.document_title,
+                    revision = EXCLUDED.revision,
+                    page_number = EXCLUDED.page_number,
+                    total_pages = EXCLUDED.total_pages,
+                    equipment_model = EXCLUDED.equipment_model,
+                    document_type = EXCLUDED.document_type,
+                    source_file = EXCLUDED.source_file,
+                    page_image_url = EXCLUDED.page_image_url
+                """,
+                rows,
+                template="(%s, %s, %s::vector, %s, %s, %s, %s, %s, %s, %s, %s)",
+            )
+        conn.commit()
 
 
 def delete_chunks(conn, chunk_ids: list[str]):
