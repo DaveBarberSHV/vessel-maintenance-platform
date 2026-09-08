@@ -392,33 +392,50 @@ vs. reasoning miss — rather than guessing.
 - A real password/access gate before the wider crew gets the URL —
   deliberately deferred, see `BACKLOG.md`
 - A live Google Drive connector, if/when one becomes available
-- **Large-format drawing resolution** — vision extraction already handles
-  scanned pages and image-only drawings automatically (built Aug 2026,
-  see above). The one remaining open piece: wide engineering sheets that
-  exceed Claude's vision API 8000px limit. Tiling into higher-resolution
-  sections is scoped but not yet built — see `BACKLOG.md`.
-- **Retrieval boost for drawing requests** — ✅ built Sept 2026; see Major features above.
-- Anything supporting more than one vessel
+- Anything supporting more than one vessel (fleet scaling architecture
+  — see `BACKLOG.md` for full scope)
+- Admin panel (web UI) for adding/removing users, approving/editing
+  Engineer Notes, and managing documents — needed before fleet scaling
 - A second, inline entry point for Engineer Notes (attached to a
   specific answer, pre-filled from its equipment context) — deliberately
   downgraded from a planned fast-follow to "only if real usage shows
   friction," once the standalone button proved to work well on its own;
   see `BACKLOG.md`
+- Ingestion progress checkpointing — large documents (700+ chunks)
+  should resume from where they left off on retry, not start over
+- Page count gate for image-only documents — warn before running vision
+  extraction on documents with >50 image-only pages
+- FILENAME_PATTERN fix to allow hyphens in model names (e.g. 807B-828B)
 
 **Items previously listed here that are now built:**
-- OCR/vision-based extraction — ✅ built Aug 2026 as `vision_extraction.py`
-  (see ingestion section above); large-format limit remains, see above
+- OCR/vision-based extraction — ✅ built Aug 2026 as `vision_extraction.py`;
+  tiling for large-format drawings ✅ built Sept 2026
+- Large-format drawing tiling — ✅ built Sept 2026; A1/A0 drawings now
+  extracted at full 300 DPI in overlapping tiles (see page_images.py)
 - Torque and length unit conversions — ✅ built, part of `UNIT_CONVERSIONS`
   table in `answer_query.py` alongside temperature/pressure
 - Equipment dropdown scaling — ✅ resolved Sept 2026 via explicit `system`
   field; see the resolved entry in `BACKLOG.md`
-- Retrieval boost for drawing requests — ✅ built Sept 2026; direct title fetch
-  bypasses semantic search for library panel clicks
+- Retrieval boost for drawing requests — ✅ built Sept 2026; direct title
+  fetch bypasses semantic search for library panel clicks
 - Tap-to-zoom images on mobile — ✅ built Sept 2026; `render_zoomable_image()`
   replaces `st.image()` across the app
 - Document library browsability panel — ✅ built Sept 2026; engineers can
   browse all documents by system in the sidebar and click to view any
   document directly, bypassing retrieval for navigation
+- Vision-assisted rename proposals — ✅ built Sept 2026; `propose_renames.py`
+  now reads the document's title block via Claude vision when filename
+  parsing fails — 14 of 15 new vendor docs proposed with high confidence
+- Unified ingest wrapper — ✅ built Sept 2026; `ingest_new_docs.py` runs
+  the full propose → review → apply → duplicate check → scan pipeline
+  in one command with human review gates
+- Batched chunk writes — ✅ built Sept 2026; `upsert_chunks()` now writes
+  in batches of 100 to prevent Supabase connection timeouts on large
+  documents (was failing on 700+ chunk files)
+- SKIP_FILES blocklist — ✅ built Sept 2026; permanently blocks superseded
+  or corrupt files from re-appearing via Drive sync
+- top_k raised to 10 — ✅ Sept 2026; fixed fundamental retrieval misses
+  where correct content ranked 6-10 (outside the previous window of 5)
 
 See `BACKLOG.md` for the reasoning behind each deferred item, and
 `README.md` for the broader project state.

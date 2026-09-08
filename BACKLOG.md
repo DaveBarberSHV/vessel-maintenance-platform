@@ -113,33 +113,28 @@ the self-service infrastructure once, correctly, before scaling.
 
 ---
 
-## 🔜 TOMORROW — Re-ingest all DWG files with tiled vision extraction
+## ✅ RESOLVED — DWG re-ingest with tiling, batch writes, SKIP_FILES (Sept 2026)
 
-Tiled vision extraction is built and committed (Sept 2026). Existing DWG
-files were ingested with the old single-image approach and need to be
-re-processed. This is the top priority for the next session.
+All 74 DWG files re-ingested with tiled vision extraction. Batch chunk
+writes (100/batch) fixed Supabase connection timeouts on large documents.
+SKIP_FILES blocklist added to permanently block superseded files from
+re-appearing via Drive sync. top_k raised from 5 to 10 — fixed
+fundamental retrieval misses (oil spec ranked 8th, outside the window).
+Vision-assisted rename proposals built into propose_renames.py —
+14 of 15 new vendor docs proposed with high confidence from title blocks.
+ingest_new_docs.py wrapper script unifies the full pipeline in one command.
 
-**Steps (from the ingestion/ directory, all env vars exported):**
-
-1. Queue all DWG files for reprocessing:
-   `python3.14 reprocess_all_dwg.py`
-
-2. Run the full ingest:
-   `python3.14 scan_folder.py "/Users/davebarber/Library/CloudStorage/GoogleDrive-.../Vessel Maintenance System Documents"`
-
-3. Watch the output — DWG files should now show tile counts
-   (e.g. "4 tiles" for an A1 drawing) instead of single-image extraction.
-
-4. After ingest, test the previously-failing questions:
-   - "I need to order a new main fuel transfer pump" (Jared thumbs-down)
-   - "Can you find where L3-32 and T-6 are shown on a drawing"
-   - "Can you show me the Harrington Hand Chain Hoist?"
-
-**Also tomorrow:**
-- Add new users (Jared's testing group) — use manage_users.py
-- Add GeneralKnowledge system to Drive and ingest the first documents
+**Open items from this session:**
+- Add new users when Jared confirms names
+- Add GeneralKnowledge system to Drive and ingest first documents
 - Address partial title match retrieval boost (#6, #7, #12 pattern)
 - Admin UI for removing/editing Engineer Notes
+- Fix FILENAME_PATTERN to allow hyphens in model names (e.g. 807B-828B)
+- Add page count gate for image-only documents (warn if >50 pages before
+  running vision extraction — the 284-page Danfoss scan cost hours and
+  multiple API failures before we got the text-layer version)
+- Add ingestion progress checkpointing so large-document retries resume
+  from where they left off rather than starting over
 
 ---
 
