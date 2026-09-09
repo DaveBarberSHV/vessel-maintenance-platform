@@ -28,7 +28,7 @@ conn = psycopg2.connect(db_url)
 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
     cur.execute("SELECT COUNT(*) as n FROM messages")
     msg_count = cur.fetchone()["n"]
-    cur.execute("SELECT COUNT(*) as n FROM conversations")
+    cur.execute("SELECT COUNT(DISTINCT conversation_id) as n FROM messages")
     conv_count = cur.fetchone()["n"]
 
 print(f"Found {conv_count} conversation(s) and {msg_count} message(s).")
@@ -50,10 +50,8 @@ if confirm.strip() != "YES":
 with conn.cursor() as cur:
     cur.execute("DELETE FROM messages")
     deleted_msgs = cur.rowcount
-    cur.execute("DELETE FROM conversations")
-    deleted_convs = cur.rowcount
 conn.commit()
 conn.close()
 
-print(f"Deleted {deleted_msgs} message(s) and {deleted_convs} conversation(s).")
+print(f"Deleted {deleted_msgs} message(s) across {conv_count} conversation(s).")
 print("Engineer Notes, document chunks, and equipment registry are untouched.")
