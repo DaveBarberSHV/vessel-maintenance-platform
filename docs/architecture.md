@@ -375,6 +375,24 @@ up:
   reliable proxy for identical content, confirmed against every real
   case found. Worth running after any future large batch import, not
   just this one.
+- **`ingestion/diagnose_latency.py`** — times each step of a real query
+  separately (open connection → baseline row count → Voyage embedding
+  call → vector search), then repeats connection + search once more.
+  Built to settle the open question above: whether slow queries are a
+  Supabase free-tier cold start or the missing ANN index finally
+  mattering. Reading it is the point — a slow first connection but fast
+  second means cold start; slow vector search on *both* passes means the
+  index is genuinely needed; a slow step 3 means it was Voyage all along,
+  not Supabase. Run it twice in a row if the first run looks slow.
+- **`ingestion/diagnose_locks.py`** — asks Postgres directly what every
+  other connection to the database is currently doing, flagging any stuck
+  `idle in transaction` (typically an earlier script killed with Ctrl+C
+  before it could commit or close cleanly) that may be holding a lock and
+  blocking new connections. Real trigger: a hang that took a
+  multi-theory debugging session to pin down. Sets `autocommit` on itself
+  so the diagnostic can never become the stuck transaction it's looking
+  for. Reach for this first whenever something hangs on connect rather
+  than failing outright.
 
 **The real investigative pattern that emerged from using these together
 (Aug 2026):** `--dry-run` shows what got retrieved and how well it

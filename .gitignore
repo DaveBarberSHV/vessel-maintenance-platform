@@ -6,3 +6,9 @@ chroma_db/
 manifest.json
 .env
 .streamlit/secrets.toml
+
+# Scratch output from propose_renames.py — regenerated into the current
+# working directory on every run, reviewed by hand, then consumed by
+# apply_renames.py. Not rename_log.csv, which IS the permanent record of
+# what was actually renamed and belongs in git.
+rename_proposals.csv
