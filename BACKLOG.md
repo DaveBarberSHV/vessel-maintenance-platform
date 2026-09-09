@@ -272,6 +272,31 @@ likely empty and can be removed too.
 
 ---
 
+## 🔲 3 manifest files with zero chunks in tm_chunks (Sept 2026)
+
+**What:** Reconciling the library totals in `CLAUDE.md` and
+`docs/architecture.md` against real data (`manifest.json` vs. a live
+`tm_chunks` query, Sept 9 2026) surfaced a 2-file gap between the two —
+144 files tracked in the manifest, but only 142 distinct `source_file`
+values in `tm_chunks`. Three specific files show up in the manifest
+(meaning `scan_folder.py` believes they've been processed) but have no
+rows in `tm_chunks` at all — meaning nothing from them is actually
+searchable:
+
+- `Shafting_Gewes_CardanShafts_RefData_RevBalancingReportB42220.pdf`
+- `Shafting_Gewes_CardanShafts_RefData_RevBalancingReportB42420.pdf`
+- `MainEngines_CAT_3512E_RefData_Rev11012021.pdf`
+
+**Action needed:** use `ingestion/inspect_page.py` to confirm ground
+truth for each file (nothing stored at all, vs. stored under an
+unexpected `source_file` value), then `ingestion/reprocess_file.py` if a
+real re-ingest is needed. Not yet root-caused — could be a real
+ingestion failure that didn't raise (silent skip), a metadata-only
+document type these three happen to share, or a `source_file` naming
+mismatch that would make this a false alarm rather than a real gap.
+
+---
+
 ## ✅ RESOLVED — duplicate detection by filename missed real content matches
 
 **Real bug found (Sept 2026):** yesterday's rename-proposal script
