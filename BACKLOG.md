@@ -306,12 +306,17 @@ Verified directly against `tm_chunks` afterward: all three now hold real
 transcribed content (1,358–2,683 characters each), and a full library-wide
 recheck confirms zero remaining manifest-says-done-but-empty files.
 
-**Not yet built:** a standing audit script comparing `manifest.json`
-against real `tm_chunks` contents — this was caught by an ad hoc
-comparison during an unrelated task, not by any repeatable check. Worth
-building (`ingestion/audit_manifest.py`, matching the existing diagnostic
-tooling pattern) so a future instance of this silent-failure class gets
-caught right after the batch that causes it, not months later.
+**Since built:** `ingestion/audit_manifest.py` — the standing version of
+the ad hoc comparison that caught this. Run against the real library, it
+also flagged 9 files with a small number of missing chunks each (a
+different, milder category than the fully-missing case above — see the
+script's own PARTIAL output). Each of the 9 was individually verified
+against `chunks.jsonl`, not assumed: 8 had a literal empty-string chunk
+recorded (a genuinely blank/image-only page, correctly skipped during
+embedding), and the 9th (`JAK_BeaconFinland_PHL_OMM_Rev09302016pdf-p14`)
+had only a page-number footer (`"14/13"`) — trivial, not real content.
+All 9 confirmed benign; nothing reprocessed. See `docs/architecture.md`'s
+diagnostic tooling section for the script itself.
 
 **Also surfaced, and since resolved:** `Electrical_Danfoss_VACON100FLOW_OMM_Rev1.pdf`
 had real chunks in `tm_chunks` but no entry in `manifest.json` — the
