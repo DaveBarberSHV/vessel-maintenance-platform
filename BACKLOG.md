@@ -313,13 +313,19 @@ building (`ingestion/audit_manifest.py`, matching the existing diagnostic
 tooling pattern) so a future instance of this silent-failure class gets
 caught right after the batch that causes it, not months later.
 
-**Also surfaced, unrelated, not yet followed up:**
-`Electrical_Danfoss_VACON100FLOW_OMM_Rev1.pdf` has real chunks in
-`tm_chunks` but no entry in `manifest.json` at all — the reverse
-situation. Likely a leftover from the rename-undo described in "Chief
-Engineer approval step in rename workflow" above. Not broken (still
-searchable), just untracked — a future `scan_folder.py` run could
-re-touch it unexpectedly since it won't be recognized as already done.
+**Also surfaced, and since resolved:** `Electrical_Danfoss_VACON100FLOW_OMM_Rev1.pdf`
+had real chunks in `tm_chunks` but no entry in `manifest.json` — the
+reverse situation, confirmed by Dave to be stale leftovers from the
+rename-undo described in "Chief Engineer approval step in rename
+workflow" above (the file was correctly re-ingested under its real name,
+`HVAC_Danfoss_VACON100FLOW_OMM_Rev1.pdf`, 771 chunks). Cleaned up: 12
+stale `tm_chunks` rows deleted (`chunk_id`s backed up to
+`/tmp/old_danfoss_chunks.json` before deletion) and its 2 orphaned page
+images removed from Supabase Storage via the bucket's `DELETE
+/object/{bucket}` endpoint with a `prefixes` body. Verified directly
+afterward: zero rows remain under the old name, the old page image URLs
+404, and the real `HVAC_Danfoss_...` document (771 chunks) was untouched
+throughout.
 
 ---
 
