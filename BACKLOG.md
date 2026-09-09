@@ -272,28 +272,54 @@ likely empty and can be removed too.
 
 ---
 
-## 🔲 3 manifest files with zero chunks in tm_chunks (Sept 2026)
+## ✅ RESOLVED — 3 manifest files with zero chunks in tm_chunks (Sept 2026)
 
-**What:** Reconciling the library totals in `CLAUDE.md` and
+**What happened:** Reconciling the library totals in `CLAUDE.md` and
 `docs/architecture.md` against real data (`manifest.json` vs. a live
-`tm_chunks` query, Sept 9 2026) surfaced a 2-file gap between the two —
-144 files tracked in the manifest, but only 142 distinct `source_file`
-values in `tm_chunks`. Three specific files show up in the manifest
-(meaning `scan_folder.py` believes they've been processed) but have no
-rows in `tm_chunks` at all — meaning nothing from them is actually
+`tm_chunks` query, Sept 9 2026) surfaced three files that `scan_folder.py`
+believed it had processed (recorded in the manifest with a chunk ID) but
+that had zero actual rows in `tm_chunks` — nothing from them was
 searchable:
 
 - `Shafting_Gewes_CardanShafts_RefData_RevBalancingReportB42220.pdf`
 - `Shafting_Gewes_CardanShafts_RefData_RevBalancingReportB42420.pdf`
 - `MainEngines_CAT_3512E_RefData_Rev11012021.pdf`
 
-**Action needed:** use `ingestion/inspect_page.py` to confirm ground
-truth for each file (nothing stored at all, vs. stored under an
-unexpected `source_file` value), then `ingestion/reprocess_file.py` if a
-real re-ingest is needed. Not yet root-caused — could be a real
-ingestion failure that didn't raise (silent skip), a metadata-only
-document type these three happen to share, or a `source_file` naming
-mismatch that would make this a false alarm rather than a real gap.
+**Root cause, confirmed with real evidence, not assumed:** all three are
+genuine single-page, no-text-layer scans (confirmed directly with
+`pdfplumber`, no NUL bytes either — ruling out today's separately-fixed
+NUL-byte bug). Two *other* Balancing Report files in the very same folder
+(`B42320`, `B42520`) are the identical document type and vision-extracted
+successfully, with real transcribed content already in `tm_chunks` —
+proving the pipeline handles this content type correctly in general. So
+this wasn't "vision extraction never ran on these" — it was a silent
+partial failure on this specific trio: the manifest got updated as if the
+chunk write succeeded, but the actual Postgres insert (or the vision
+transcription feeding it) failed silently for just these three, with
+nothing catching the mismatch until this manual reconciliation.
+
+**Fix applied:** `ingestion/reprocess_file.py` on all three (clears
+manifest + local chunk record) → re-ran `scan_folder.py` against the full
+library (hash-based skip logic meant only these 3 of 144 files actually
+reprocessed) → all three successfully vision-transcribed and embedded.
+Verified directly against `tm_chunks` afterward: all three now hold real
+transcribed content (1,358–2,683 characters each), and a full library-wide
+recheck confirms zero remaining manifest-says-done-but-empty files.
+
+**Not yet built:** a standing audit script comparing `manifest.json`
+against real `tm_chunks` contents — this was caught by an ad hoc
+comparison during an unrelated task, not by any repeatable check. Worth
+building (`ingestion/audit_manifest.py`, matching the existing diagnostic
+tooling pattern) so a future instance of this silent-failure class gets
+caught right after the batch that causes it, not months later.
+
+**Also surfaced, unrelated, not yet followed up:**
+`Electrical_Danfoss_VACON100FLOW_OMM_Rev1.pdf` has real chunks in
+`tm_chunks` but no entry in `manifest.json` at all — the reverse
+situation. Likely a leftover from the rename-undo described in "Chief
+Engineer approval step in rename workflow" above. Not broken (still
+searchable), just untracked — a future `scan_folder.py` run could
+re-touch it unexpectedly since it won't be recognized as already done.
 
 ---
 
