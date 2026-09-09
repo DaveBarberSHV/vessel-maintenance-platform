@@ -7,7 +7,8 @@ SAFETY FEATURES:
 - Dry-run by default — prints what would happen, touches nothing
 - Skips rows marked REVIEW, SKIP, or with no proposed name
 - Never overwrites an existing file
-- Writes a permanent mapping log (rename_log.csv) afterward
+- Appends to a permanent mapping log (ingestion/rename_log.csv) afterward,
+  never truncating it — the log accumulates across every run
 
 Usage:
     # Dry run first — review output carefully
@@ -88,13 +89,26 @@ def run(csv_path: str, folder_path: str, apply: bool = False):
             for e in errors:
                 print(f"  {e}")
 
-        # Write the permanent mapping log
-        log_path = Path("rename_log.csv")
-        with open(log_path, "w", newline="") as f:
+        # Append to the permanent mapping log.
+        #
+        # Two real bugs fixed here (Sept 2026), both of which silently
+        # destroyed rename history before anyone noticed:
+        #   1. This opened the log with "w", truncating it — so each run
+        #      wiped every prior run's record. A batch of 79 shipyard
+        #      renames was overwritten by a later 13-file run and only
+        #      recovered from git history.
+        #   2. Path("rename_log.csv") resolved against the *current*
+        #      directory, so the log landed wherever the script happened
+        #      to be run from, scattering copies. Pinning it next to this
+        #      script means one canonical file regardless of cwd.
+        log_path = Path(__file__).parent / "rename_log.csv"
+        write_header = not log_path.exists()
+        with open(log_path, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=["original", "renamed_to", "folder"])
-            writer.writeheader()
+            if write_header:
+                writer.writeheader()
             writer.writerows(applied)
-        print(f"Permanent rename log written to: {log_path.absolute()}")
+        print(f"Appended {len(applied)} rename(s) to permanent log: {log_path}")
         print()
         print("Next step: run scan_folder.py to ingest the renamed files.")
     else:
