@@ -58,6 +58,30 @@ loss during an edit, a stale value that shouldn't have been there).
   structure with `ls` first if unsure (the folder structure itself has
   changed at least once — subfolders were added by system).
 
+## Credential handling — critical rule
+
+**Never ask Dave to paste Terminal output that might contain credentials.**
+This has caused real pain — the `SUPABASE_DB_URL` was accidentally exposed
+in chat multiple times because Terminal output grabbed more than intended,
+the font is tiny, and it's easy to miss a credential buried in a long
+command response.
+
+**The rules:**
+- Never ask Dave to `echo $SUPABASE_DB_URL` or any other credential
+- Never ask Dave to paste `cat ~/.streamlit/secrets.toml`
+- When giving export commands, always use `"..."` placeholders:
+  `export SUPABASE_DB_URL="..."` — Dave fills in the value locally
+- If a credential appears in chat, flag it immediately and prompt a
+  rotation — don't let it slide even for one more message
+- Verification commands that don't expose credentials are fine:
+  `python3.14 list_engineer_notes.py` — shows data, not the key itself
+
+**The reason this keeps happening:** Dave needs to copy/paste Terminal
+output to share results, the Terminal font is very small, multi-line
+output is hard to review quickly, and credentials get buried in export
+commands that look like innocuous setup steps. Claude needs to be the
+guard here, not Dave.
+
 ## General working pattern that's worked well
 
 1. Build/fix something, test it as thoroughly as possible in sandbox
