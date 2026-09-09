@@ -44,6 +44,20 @@ class Chunk:
     # (which can differ due to cover pages/front matter — see BACKLOG.md)
 
 
+def _strip_nul_bytes(text: str) -> str:
+    """Strip NUL (0x00) characters from extracted text. Real bug found
+    Sept 2026: a CAD-exported PDF (Stability_MBB_C35DeckFittingCalcs)
+    failed ingestion entirely with 'A string literal cannot contain NUL
+    (0x00) characters' — Postgres's text type flatly rejects them, and
+    some CAD export paths embed them in their text layer (a known,
+    if uncommon, PDF-generation quirk). Stripped once, here, at the
+    single point all extracted text passes through — rather than at
+    each downstream consumer — so every caller gets clean text
+    automatically, including table extraction and vision-transcribed
+    text that gets combined with native text later."""
+    return text.replace("\x00", "")
+
+
 def extract_pages(path: Path):
     """Return list of (page_number, text, tables) tuples. Tries platform
     container format first (plain text only, tables=[] since structure
@@ -58,6 +72,7 @@ def extract_pages(path: Path):
                 for p in manifest["pages"]:
                     txt_path = p.get("text", {}).get("path")
                     text = z.read(txt_path).decode("utf-8", errors="replace") if txt_path else ""
+                    text = _strip_nul_bytes(text)
                     pages.append((p["page_number"], text, []))
                 return pages
     except zipfile.BadZipFile:
@@ -69,12 +84,12 @@ def extract_pages(path: Path):
     pages = []
     with pdfplumber.open(path) as pdf:
         for i, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text() or ""
+            text = _strip_nul_bytes(page.extract_text() or "")
 
             tables = extract_structured_tables(page)
             if tables:
                 table_blocks = "\n\n".join(render_as_markdown(t) for t in tables)
-                text = f"{text}\n\n{table_blocks}"
+                text = f"{text}\n\n{_strip_nul_bytes(table_blocks)}"
 
             pages.append((i, text, tables))
     return pages
