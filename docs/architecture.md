@@ -75,12 +75,20 @@ flowchart LR
   with a reviewable CSV, `ingestion/apply_renames.py` applies them after
   human approval) and ingested across 9 new systems (GeneralArrangement,
   Stability, Electrical, Piping, Tonnage, CompressedAir, FuelOil, HVAC,
-  plus more Hull content). Library now: 131 files, ~20 systems, ~7,900
-  chunks. Verified live against real, specific questions across the new
-  systems (piping GPM ratings, electrical fault current calculations,
-  gross tonnage) with accurate, well-sourced answers — including
-  correctly recognizing genuine ambiguity (US vs. international tonnage
-  regimes) rather than picking one arbitrarily.
+  plus more Hull content). Library at that point: 131 files, ~20 systems,
+  ~7,900 chunks. Verified live against real, specific questions across
+  the new systems (piping GPM ratings, electrical fault current
+  calculations, gross tonnage) with accurate, well-sourced answers —
+  including correctly recognizing genuine ambiguity (US vs. international
+  tonnage regimes) rather than picking one arbitrarily.
+  **Current totals (verified directly against `manifest.json` and
+  `tm_chunks`, Sept 9 2026): 144 files, 21 systems, 9,201 chunks.** Note:
+  3 manifest files currently have zero chunks in `tm_chunks`
+  (`Shafting_Gewes_CardanShafts_RefData_RevBalancingReportB42220.pdf`,
+  `Shafting_Gewes_CardanShafts_RefData_RevBalancingReportB42420.pdf`,
+  `MainEngines_CAT_3512E_RefData_Rev11012021.pdf`) — not yet root-caused,
+  worth checking with `inspect_page.py` or a `reprocess_file.py` run
+  before assuming it's benign.
 - **Parse & chunk** — `ingestion/parse_and_chunk.py` + `ingestion/table_extraction.py`.
   Genuine PDFs get structured table extraction (recovers marker/checkbox
   cells that plain text loses — verified fix, see `BACKLOG.md`), not just

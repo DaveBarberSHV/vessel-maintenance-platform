@@ -48,7 +48,9 @@ review it together. No exceptions, even for small changes.
 
 ## Current state (September 2026)
 
-- **Library:** ~160 PDFs, ~20 systems, ~9,000+ chunks ingested
+- **Library:** 144 PDFs, 21 systems, 9,201 chunks (verified directly
+  against `manifest.json`/`tm_chunks` Sept 9 2026 — see
+  `docs/architecture.md` for the 3-file discrepancy still open)
 - **Deployed:** Streamlit Cloud, live and working
 - **Jared** (Chief Engineer, M/V Polaris) is the primary user and
   test partner — approaching Port Engineer demo soon
