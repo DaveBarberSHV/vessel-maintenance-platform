@@ -401,6 +401,19 @@ up:
   so the diagnostic can never become the stuck transaction it's looking
   for. Reach for this first whenever something hangs on connect rather
   than failing outright.
+- **`ingestion/audit_manifest.py`** — added Sept 2026, real trigger: two
+  bugs the same day, both only found by an ad hoc manual comparison —
+  files `manifest.json` recorded as done with zero actual rows in
+  `tm_chunks` (see the resolved 3-file entry in `BACKLOG.md`), and the
+  reverse, chunks in `tm_chunks` with no manifest entry at all (see the
+  `Electrical_Danfoss` cleanup, also in `BACKLOG.md`). Makes that
+  comparison a standing, one-command check instead of something that only
+  happens to get caught during an unrelated task. Reports fully-missing
+  files (the clear, always-worth-fixing case), partial mismatches (judged
+  by percentage — a lone missing page in an otherwise large document is
+  usually just the expected "skipped — no text layer" behavior, not a
+  bug), and orphaned `tm_chunks` entries with no manifest record. Worth
+  running after any batch import or reprocessing pass, not just once.
 
 **The real investigative pattern that emerged from using these together
 (Aug 2026):** `--dry-run` shows what got retrieved and how well it
