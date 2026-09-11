@@ -22,6 +22,53 @@ the command structure (with `"..."` placeholders) here for reference.
 
 ---
 
+## 🔲 Vessel knowledge graph — cross-system reasoning (Sept 2026 concept)
+
+**What:** Fathom currently retrieves chunks based on semantic similarity but
+has no awareness that "CB-47" on electrical drawing E-12 is the same
+physical circuit breaker referenced on fuel oil piping schematic P02.
+Building a vessel knowledge graph would connect these dots automatically —
+the same way a young Navy officer learns a ship by physically tracing
+every system from source to endpoint.
+
+**The motivating questions this would answer:**
+- "Which electrical circuits and valves need to be tagged out to isolate
+  the port engine fuel injection pump for repair?"
+- "What could be causing no fuel flow to the port engine? Walk me
+  through every possible cause across the fuel, electrical, and control
+  systems."
+- "Show me every system that connects to the FO transfer pump."
+
+**Why this matters operationally:** Tagout/lockout procedures are an
+OSHA and USCG requirement. A system that generates a preliminary tagout
+list from actual vessel drawings is a real operational safety tool.
+Frame it to Jared as "Fathom learning the ship the way a new engineering
+officer does."
+
+**Three-phase build plan:**
+- Phase 1 (2-3 sessions): Entity extraction during ingestion — valve
+  tags, breaker numbers, pump designations, pipe line numbers extracted
+  as structured metadata alongside each chunk
+- Phase 2 (1-2 sessions): Cross-reference matching — build a
+  cross-reference table linking the same entity across multiple
+  documents
+- Phase 3 (2-3 sessions): Graph-aware retrieval — retrieval follows
+  cross-reference links automatically across piping, electrical, and
+  OEM manual chunks
+
+**Test first before building:** Ask Fathom "What systems would need to
+be isolated to work on the port engine fuel injection pump?" — the
+current system may already reason across documents better than
+expected.
+
+**Why this is a competitive differentiator:** No one has built a vessel
+knowledge graph at this level for working tugs. At fleet scale this
+becomes the answer to "why not just use the OEM portal?" — because
+Fathom knows how all the systems on your specific vessel connect to
+each other.
+
+---
+
 ## 🔲 Chief Engineer approval step in rename workflow (Sept 2026)
 
 **What:** The current rename flow is Dave-reviews-and-approves. The
