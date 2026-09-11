@@ -164,6 +164,49 @@ def is_real_language(text: str) -> bool:
     return True
 
 
+_TABLE_SEPARATOR_ROW = re.compile(r"^\|[\s\-|]*\|$")
+
+
+def meaningful_text_length(text: str) -> int:
+    """Real informational content length — ignores markdown table
+    scaffolding (separator rows, empty cells) that can otherwise inflate
+    a graphics-only page's raw character count without representing any
+    real content at all.
+
+    Real bug this fixes (Sept 2026): a piping schematic's actual flow
+    diagram page had zero native text — every visible label (equipment
+    tags, engine names, pipe sizes) is drawn, not typed. Its only native
+    text was a title-block company name plus several fully or mostly
+    blank tables — pdfplumber detecting the title block's own grid lines
+    as table structure, with nothing filled in. Blank markdown cells
+    alone pushed the raw character count to 255, past
+    VISION_CANDIDATE_CHAR_THRESHOLD (200), so the page was wrongly
+    classified as "has real text" and never became a vision candidate —
+    even though virtually all of its real content is graphical and can
+    only ever be captured by vision. Confirmed directly: the actual page
+    image shows a full flow diagram (engines, tanks, equipment tags);
+    the extracted text was just boilerplate.
+
+    Strips separator rows entirely and, for table rows, counts only
+    non-empty cell content — so a page's real informational content is
+    measured directly rather than inferred from raw length, which table
+    syntax and blank cells can inflate arbitrarily without adding any
+    real information."""
+    real_chars = 0
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if _TABLE_SEPARATOR_ROW.match(line):
+            continue
+        if line.startswith("|") and line.endswith("|"):
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            real_chars += sum(len(c) for c in cells)
+        else:
+            real_chars += len(line)
+    return real_chars
+
+
 def validate_pdf(path: Path) -> tuple[bool, str | None]:
     """Sanity-check a file before processing. Returns (is_valid, issue).
     A file that fails this should be reported clearly and skipped —
@@ -478,11 +521,48 @@ def scan_folder(folder: Path, engine: str = "voyage"):
             # catches this: reversed or otherwise garbled text has
             # essentially none of the extremely common short words real
             # English prose always has ("the," "and," "of," "to").
-            text_chunks = [
-                c for c in file_chunks
-                if len(c.text.strip()) >= VISION_CANDIDATE_CHAR_THRESHOLD
-                and is_real_language(c.text)
-            ]
+            #
+            # Raw length isn't the right measure either (Sept 2026, real
+            # bug found live): a different drawing's only native text was
+            # a title-block company name plus several blank tables —
+            # genuine, correctly-spelled text, so is_real_language()
+            # above doesn't (and shouldn't) catch it, but the blank
+            # tables' pipe/dash scaffolding alone pushed the raw
+            # character count past the threshold, even though they carry
+            # zero real content. meaningful_text_length() strips that
+            # scaffolding and empty cells so the threshold measures real
+            # content, not table syntax — see its docstring for the full
+            # story.
+            #
+            # Judged per page, using the primary page-level chunk, not
+            # independently per chunk (Sept 2026, real regression caught
+            # before shipping): split_dense_tables() deliberately produces
+            # short, terse sub-chunks (see TABLE_ROW_GROUP_SIZE) — a real,
+            # substantial page can easily have a 2000+ char primary chunk
+            # alongside a 6-row sub-chunk of mostly part numbers that, on
+            # its own, sits under the meaningful-length threshold purely
+            # because it's short by design, not because it lacks real
+            # content. Gating per chunk would flag that page as a vision
+            # candidate anyway, needlessly re-running (and, worse,
+            # overwriting) an already-good primary chunk's native
+            # extraction — confirmed directly against real production
+            # data before this was caught: 1095 chunks across the library
+            # would have been wrongly flagged this way. Whether a page
+            # needs vision is a property of the page, decided once by its
+            # primary chunk; a dense-table sub-chunk is always a derived,
+            # necessarily-shorter subset of that same page's content, not
+            # an independent signal.
+            primary_chunk_by_page = {
+                c.page_number: c for c in file_chunks
+                if "-densetable" not in c.chunk_id
+            }
+
+            def _page_has_real_text(c):
+                primary = primary_chunk_by_page.get(c.page_number, c)
+                return (meaningful_text_length(primary.text) >= VISION_CANDIDATE_CHAR_THRESHOLD
+                        and is_real_language(primary.text))
+
+            text_chunks = [c for c in file_chunks if _page_has_real_text(c)]
             no_text_chunks = [c for c in file_chunks if c not in text_chunks]
 
             # Vision extraction for pages with no text layer (Aug 2026) —

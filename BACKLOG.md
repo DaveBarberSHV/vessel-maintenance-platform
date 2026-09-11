@@ -3,18 +3,17 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
-## 🔺 IMMEDIATE — Rotate SUPABASE_DB_URL password (Sept 2026)
+## ✅ RESOLVED — Rotate SUPABASE_DB_URL password (Sept 2026)
 
 **What happened:** The full `SUPABASE_DB_URL` connection string (including
 password) was pasted into a Claude chat session on Sept 7, 2026. While
 Anthropic does not store or use conversation data maliciously, credentials
 in chat logs are a security risk and should be treated as compromised.
 
-**Action required before the demo:**
-1. Go to Supabase → Settings → Database → Reset database password
-2. Update the new password in `.streamlit/secrets.toml` on your local machine
-3. Update the Streamlit Cloud secrets (app settings → Secrets)
-4. Re-export the new `SUPABASE_DB_URL` in any open Terminal sessions
+**Resolved:** password rotated (confirmed by Dave, Sept 9 2026 — done
+twice that day, since the first rotation attempt needed a redo). Reset
+in Supabase, updated in `.streamlit/secrets.toml` and Streamlit Cloud
+secrets.
 
 **Standing rule:** Never paste credentials into chat. Use the export
 command in Terminal with the value filled in locally, then paste only
@@ -584,16 +583,44 @@ with vision extraction's real capability (also separately confirmed
 fine on other DWGs — see same entry). It's specifically this threshold
 letting boilerplate-heavy graphics pages slip through.
 
-**Likely fix, not yet built:** the blank/empty-celled tables that
-inflate the character count here carry no information — a markdown
-table where every data cell is blank contributes to `len(text)` without
-representing any real content. Excluding blank-table markdown from the
-threshold check (or requiring the *tables* extracted via
-`extract_structured_tables()` to have at least some non-empty cells
-before counting their rendered length) would likely have caught this
-specific case without needing to just blindly raise the threshold, which
-risks new false negatives elsewhere. Worth testing against this exact
-file before deciding on the fix.
+**Fixed (Sept 11 2026):** added `meaningful_text_length()` to
+`scan_folder.py` — strips markdown table separator rows and empty cells
+before counting, so blank table scaffolding can no longer inflate a
+graphics-only page's character count past the threshold. Verified
+directly against the real bug text: raw length 247, meaningful length
+36 (well under 200) — correctly now triggers vision. Verified it doesn't
+regress real content either: sampled real O&M Manual pages with
+substantial native text kept ~99% of their raw length under the new
+measure.
+
+**A real regression caught before shipping, worth recording:** the
+first version of this fix checked `meaningful_text_length()`
+independently per chunk. That broke on `split_dense_tables()` sub-chunks
+(e.g. `-densetable5`), which are deliberately short by design (6 data
+rows per sub-chunk) — a genuinely good page with a 2,225-character
+primary chunk could have a legitimate terse sub-chunk dip under the
+threshold on its own, wrongly flagging the whole page for vision
+re-processing and **overwriting the already-good primary chunk** with a
+vision reproduction. Caught by running the corrected check against the
+real library before shipping: naive per-chunk gating flagged **1,095
+chunks**: page-level gating (using the primary, non-`densetable` chunk
+to decide for the whole page — a dense-table sub-chunk is always a
+derived subset of that same page, never an independent signal) flagged
+the real number: **146 pages across 55 files**. Fix: vision-candidacy is
+now decided once per page, by the primary chunk, and every chunk on that
+page (primary and any dense-table sub-chunks) follows that same
+decision.
+
+**Real, measured blast radius (page-level, corrected logic):** 146
+pages across 55 distinct files, overwhelmingly DWG/General Arrangement/
+Wiring Diagram/Reference Data document types — exactly the graphics-
+heavy, sparse-native-text profile this bug predicts. Includes both
+`P03` and `P13` (the original motivating case),
+`PropulsionControl_Berg_MPC800A_WiringDiagram_Rev62481C.pdf` (23 pages
+alone), and most of the Hull/GeneralArrangement DWG set. Not yet
+reprocessed — reprocessing all 55 files means ~146 real vision API
+calls, a real (modest) cost worth an explicit go-ahead before running at
+this scale, unlike the earlier 3-file fix this session.
 
 **Worth doing regardless of the knowledge graph decision:** this is a
 real, standalone ingestion gap, independent of whether entity extraction
