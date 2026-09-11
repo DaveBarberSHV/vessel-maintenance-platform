@@ -61,6 +61,60 @@ be isolated to work on the port engine fuel injection pump?" — the
 current system may already reason across documents better than
 expected.
 
+**Real test result (Sept 11 2026):** Asked exactly this question. Fathom
+gave a solid general engine-lockout answer (fuel depressurization,
+starting-system isolation, battery disconnect) sourced entirely from the
+CAT 3512E O&M Manual and Berg propulsion docs — and it correctly, honestly
+flagged that it had nothing document-specific for the injection pump
+itself, naming the two relevant piping schematics (P03, P13) as existing
+in the library but not retrieved. Same honest-about-gaps behavior already
+documented elsewhere in this file, working as designed.
+
+Dug one level deeper with real evidence rather than taking that at face
+value:
+- **Confirmed structural, not a ranking problem.** Ran the same question
+  through `query_chunks(top_k=30)` — neither `Piping_MBB_P03FuelOilServicePipingSchematic_DWG_Rev0.pdf`
+  nor the P13 lube oil equivalent appears anywhere in the top 30 results,
+  out of the whole library. Not "just below the cutoff" — semantic
+  embedding similarity doesn't connect narrative safety questions to
+  schematic content at all, regardless of `top_k`.
+- **A second, more important finding: even where DWG content *is*
+  captured, it's the wrong granularity.** Inspected P03's actual 6 chunks
+  directly (not empty, not garbage) — what vision extraction captured
+  well is the drawing's general notes, symbol legend, and material-spec
+  table (real, useful safety text: *"EACH REMOTE VALVE CONTROL FOR THE
+  FUEL SHUT-OFF VALVES MUST BE MARKED IN CLEARLY LEGIBLE LETTERS,"*
+  *"FUEL TANK SUCTION VALVES...FITTED WITH PNEUMATICALLY ACTUATED, REMOTE
+  QUICK CLOSING VALVES"*). What's *not* captured: the flow-diagram graphic
+  itself — specific valve tags and line numbers positioned on the
+  drawing, tied to specific equipment instances. Vision extraction
+  transcribes text regions (legend/notes/title block) well; it's unproven
+  whether it can reliably capture per-instance graphical callouts at all.
+
+**What this changes about the plan:** Phase 1 (entity extraction) assumes
+tag numbers are already sitting in extracted text, just unlinked across
+documents. The real evidence above suggests a more basic question needs
+answering first — can vision extraction reliably pull individual tag
+callouts off a P&ID-style drawing, as opposed to its legend and notes?
+If not yet, Phase 1 is "get vision extraction to find tags it currently
+misses," a different and less-bounded problem than the 2-3 session
+estimate assumes.
+
+**Recommended before committing to Phase 1:**
+1. Spot-check 2-3 more DWGs (an electrical one-line, another piping
+   schematic) the same way — confirm whether the legend-not-graphic
+   pattern holds generally or P03 was a bad example.
+2. A smaller, separate, buildable-now win regardless of the graph
+   decision: the real legend/notes content already sitting in these DWG
+   chunks is currently invisible to any question that doesn't happen to
+   match it semantically. A targeted retrieval boost — when a question
+   names a system/equipment and uses isolation/lockout/safety language,
+   directly pull that equipment's DWG-type chunks via the existing
+   `vessel_equipment` lookup rather than relying on semantic similarity —
+   would surface this content with no entity graph required. Same spirit
+   as the existing exact-title DWG bypass (`fetch_chunks_by_title`),
+   generalized to a system/safety trigger instead of an exact title match.
+
 **Why this is a competitive differentiator:** No one has built a vessel
 knowledge graph at this level for working tugs. At fleet scale this
 becomes the answer to "why not just use the OEM portal?" — because
