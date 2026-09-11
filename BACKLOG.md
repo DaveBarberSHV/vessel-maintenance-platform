@@ -78,42 +78,76 @@ value:
   out of the whole library. Not "just below the cutoff" — semantic
   embedding similarity doesn't connect narrative safety questions to
   schematic content at all, regardless of `top_k`.
-- **A second, more important finding: even where DWG content *is*
-  captured, it's the wrong granularity.** Inspected P03's actual 6 chunks
-  directly (not empty, not garbage) — what vision extraction captured
-  well is the drawing's general notes, symbol legend, and material-spec
-  table (real, useful safety text: *"EACH REMOTE VALVE CONTROL FOR THE
-  FUEL SHUT-OFF VALVES MUST BE MARKED IN CLEARLY LEGIBLE LETTERS,"*
-  *"FUEL TANK SUCTION VALVES...FITTED WITH PNEUMATICALLY ACTUATED, REMOTE
-  QUICK CLOSING VALVES"*). What's *not* captured: the flow-diagram graphic
-  itself — specific valve tags and line numbers positioned on the
-  drawing, tied to specific equipment instances. Vision extraction
-  transcribes text regions (legend/notes/title block) well; it's unproven
-  whether it can reliably capture per-instance graphical callouts at all.
+- **A second finding, initially misread, corrected by looking at the
+  actual chunk content and the real page images directly (not just
+  query results):** P03's 4 "densetable" sub-chunks are byte-for-byte
+  identical — confirmed suspicious at first, but reading the full text
+  (not just a preview) showed all 4 tile markers present and correctly
+  combined. **Nothing was lost — this is `scan_folder.py` grouping
+  pre-existing dense-table placeholder chunks by page number and
+  assigning the same correctly-combined vision text to all of them**,
+  wasting embedding/storage cost (4x for P03, 6x for P13) but not
+  destroying content. A real, minor bug, not the significant one.
+- **The real, significant finding, found by viewing the actual drawing
+  images directly:** P03 sheet 1 (viewed) is genuinely just the legend,
+  material schedule, and general notes — no flow diagram at all, and
+  vision correctly captured it in full. Sheet 2 (also viewed) is the
+  actual flow diagram — Main Engine (Port/Stbd), day tanks, 3 generator
+  engines, and equipment tags `605-05`/`605-10` on the exact fuel filter/
+  water separators in each engine's supply line, matching sheet 1's
+  Equipment List by number. This is exactly the content the motivating
+  question needed. **It extracted as only 255 characters — title block
+  boilerplate and blank table borders, zero real content** — because it
+  never became a vision candidate at all. Root-caused precisely and
+  written up as its own standalone entry below ("Vision-extraction skip
+  threshold misses graphics-only pages with junk native text") since it's
+  a real, valuable ingestion bug independent of this concept.
+- **Spot-checked 3 more DWGs, and the picture is more nuanced than
+  "vision can't capture graphical tags":** `MainSwitchboard_SouthCoastElectric_SCE2020780GenControlSwitchboard_DWG_Rev2.pdf`
+  (a real electrical schematic, not tiled — 35 ordinary pages) captured
+  dense, genuine per-instance component tags in full: breaker specs
+  (`200AT LSI`), wire/terminal numbers (`1BKTB`, `1FU1`), CT ratios — proof
+  vision extraction handles this well when the drawing type suits it.
+  `Electrical_MBB_E12ElectricalEquipmentArrgt_DWG_Rev1.pdf` (a plan-view
+  general arrangement) hit a different, self-reported limit — Claude's
+  own transcription said *"Many interior labels and equipment tags within
+  the actual plan view drawing are too small/low resolution to transcribe
+  with confidence."* A real, distinct, resolution-bound limitation, not a
+  content-selection one.
 
-**What this changes about the plan:** Phase 1 (entity extraction) assumes
-tag numbers are already sitting in extracted text, just unlinked across
-documents. The real evidence above suggests a more basic question needs
-answering first — can vision extraction reliably pull individual tag
-callouts off a P&ID-style drawing, as opposed to its legend and notes?
-If not yet, Phase 1 is "get vision extraction to find tags it currently
-misses," a different and less-bounded problem than the 2-3 session
-estimate assumes.
+**What this changes about the plan:** the P03/P13 gap was never really
+about vision extraction's capability — it was almost entirely the vision-
+skip threshold bug (see standalone entry below) plus one minor
+duplication bug, neither of which reflects a ceiling on what vision
+extraction can do. The genuinely open question for Phase 1 is different:
+**piping drawings on this vessel tag equipment (`605-05`, `605-10`), not
+individual valves** — valves are identified only by symbol type per the
+legend, with no unique per-instance ID. Electrical schematics, by
+contrast, do tag every component uniquely (confirmed via `MainSwitchboard`).
+Phase 1 needs two different extraction targets, not one uniform
+"extract every tag" approach — equipment numbers for piping (already a
+real, structured field, and adjacent to the existing `vessel_equipment`
+natural key), component reference designators for electrical (already
+proven capturable). General-arrangement/plan-view drawings may need a
+resolution fix (higher render DPI, or tiling extended beyond just
+large-format A0/A1 sheets) before either extraction target works there.
 
 **Recommended before committing to Phase 1:**
-1. Spot-check 2-3 more DWGs (an electrical one-line, another piping
-   schematic) the same way — confirm whether the legend-not-graphic
-   pattern holds generally or P03 was a bad example.
+1. Fix the vision-skip threshold bug first (see standalone entry below)
+   — Phase 1 entity extraction is only as good as what actually got
+   ingested, and this bug is silently dropping exactly the pages with the
+   richest tag data.
 2. A smaller, separate, buildable-now win regardless of the graph
-   decision: the real legend/notes content already sitting in these DWG
-   chunks is currently invisible to any question that doesn't happen to
-   match it semantically. A targeted retrieval boost — when a question
-   names a system/equipment and uses isolation/lockout/safety language,
-   directly pull that equipment's DWG-type chunks via the existing
-   `vessel_equipment` lookup rather than relying on semantic similarity —
-   would surface this content with no entity graph required. Same spirit
-   as the existing exact-title DWG bypass (`fetch_chunks_by_title`),
-   generalized to a system/safety trigger instead of an exact title match.
+   decision: the real legend/notes content already sitting in DWG chunks
+   like P03 sheet 1 is currently invisible to any question that doesn't
+   happen to match it semantically. A targeted retrieval boost — when a
+   question names a system/equipment and uses isolation/lockout/safety
+   language, directly pull that equipment's DWG-type chunks via the
+   existing `vessel_equipment` lookup rather than relying on semantic
+   similarity — would surface this content with no entity graph required.
+   Same spirit as the existing exact-title DWG bypass
+   (`fetch_chunks_by_title`), generalized to a system/safety trigger
+   instead of an exact title match.
 
 **Why this is a competitive differentiator:** No one has built a vessel
 knowledge graph at this level for working tugs. At fleet scale this
@@ -504,6 +538,69 @@ produce equivalent correct content anyway, just at some avoidable API
 cost) — a meaningfully different risk profile than the original
 problem, which silently omitted real content entirely. Worth a further
 refinement someday if it turns out to matter in practice, not urgent.
+
+---
+
+## 🔲 Vision-extraction skip threshold misses graphics-only pages with junk native text (Sept 2026)
+
+**What happened:** Found while spot-checking DWGs for the vessel
+knowledge graph concept (see that entry above). `Piping_MBB_P03FuelOilServicePipingSchematic_DWG_Rev0.pdf`
+sheet 2 — the actual fuel oil piping flow diagram, showing Main Engine
+(Port), Main Engine (Stbd), 3 generator engines, both day tanks, and
+equipment tags `605-05`/`605-10` on the exact fuel filter/water
+separators in each engine's supply line — extracted as only **255
+characters of real content**. Confirmed directly by viewing the actual
+page image: the diagram is genuinely rich (verified visually, not
+assumed), but everything on it — engine boxes, tank boxes, pipe-size
+callouts, equipment tags, valve symbols — is graphical/vector content
+with no native text layer. The only real native text on the page is the
+title block company name and a handful of blank table borders (title
+block revision fields with nothing filled in).
+
+**Root cause, confirmed directly in code:** `scan_folder.py`'s
+`VISION_CANDIDATE_CHAR_THRESHOLD = 200` decides whether a page needs
+vision extraction — `len(text.strip()) >= 200 and is_real_language(text)`.
+This page's junk native text (title block boilerplate + empty table
+cells) happened to add up to 255 characters, and "GUARINO & COX, LLC" is
+genuine, correctly-ordered English, so it clears `is_real_language()`
+too. Both checks pass on text that carries essentially zero real
+information, so the page gets classified as "has real text" and **never
+becomes a vision candidate at all** — no warning, nothing in the ingest
+log, nothing to flag it. This is a different mechanism from the
+reversed-title-block bug `is_real_language()` was built to catch (see
+above) — this text isn't garbled, it's genuinely real, just
+near-content-free — but the effect is the same category of failure: the
+page's actual content was never captured by anything.
+
+**Why this matters beyond this one file:** the real motivating test for
+the knowledge graph concept asked Fathom what needs isolating to work on
+the port engine fuel injection pump. The single most relevant page in
+the entire library for that exact question — the one showing the fuel
+filter/water separator equipment tag directly in the port engine's
+supply line — was never ingested as searchable content at all, for a
+reason that has nothing to do with retrieval ranking (already separately
+confirmed structural — see the knowledge graph entry) and nothing to do
+with vision extraction's real capability (also separately confirmed
+fine on other DWGs — see same entry). It's specifically this threshold
+letting boilerplate-heavy graphics pages slip through.
+
+**Likely fix, not yet built:** the blank/empty-celled tables that
+inflate the character count here carry no information — a markdown
+table where every data cell is blank contributes to `len(text)` without
+representing any real content. Excluding blank-table markdown from the
+threshold check (or requiring the *tables* extracted via
+`extract_structured_tables()` to have at least some non-empty cells
+before counting their rendered length) would likely have caught this
+specific case without needing to just blindly raise the threshold, which
+risks new false negatives elsewhere. Worth testing against this exact
+file before deciding on the fix.
+
+**Worth doing regardless of the knowledge graph decision:** this is a
+real, standalone ingestion gap, independent of whether entity extraction
+or graph-aware retrieval ever gets built. Fixing it means Fathom can
+correctly answer "what's in the fuel supply line to the port engine"
+today, using existing retrieval, once the content actually exists to
+retrieve.
 
 ---
 
