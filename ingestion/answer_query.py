@@ -541,7 +541,12 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 10,
         )
 
     import anthropic
-    client = anthropic.Anthropic(api_key=key)
+    # Explicit timeout (Sept 2026, real bug found live in ingestion —
+    # see vision_extraction.py): without one, a stalled connection hangs
+    # forever with nothing to catch it. This is the live app's answer
+    # path, so an unbounded hang here means a user's chat freezes with
+    # no error at all — worse than the same bug in an offline script.
+    client = anthropic.Anthropic(api_key=key, timeout=120.0)
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1000,

@@ -540,7 +540,7 @@ refinement someday if it turns out to matter in practice, not urgent.
 
 ---
 
-## 🔲 Vision-extraction skip threshold misses graphics-only pages with junk native text (Sept 2026)
+## ✅ RESOLVED — Vision-extraction skip threshold misses graphics-only pages with junk native text (Sept 2026)
 
 **What happened:** Found while spot-checking DWGs for the vessel
 knowledge graph concept (see that entry above). `Piping_MBB_P03FuelOilServicePipingSchematic_DWG_Rev0.pdf`

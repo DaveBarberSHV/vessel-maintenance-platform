@@ -324,7 +324,9 @@ Set confidence to "high" if clearly readable, "low" if guessing.
 If you cannot determine the fields reliably, respond with {"confidence": "none"}"""
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        # Explicit timeout (Sept 2026, real bug found live) — see
+        # vision_extraction.py's client construction for the full story.
+        client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
         response = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=200,

@@ -24,7 +24,9 @@ def diagnose(pdf_path: Path):
         text = "\n".join(page.extract_text() or "" for page in pdf.pages)
 
     key = os.environ.get("ANTHROPIC_API_KEY")
-    client = anthropic.Anthropic(api_key=key)
+    # Explicit timeout (Sept 2026, real bug found live) — see
+    # vision_extraction.py's client construction for the full story.
+    client = anthropic.Anthropic(api_key=key, timeout=120.0)
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=16000,

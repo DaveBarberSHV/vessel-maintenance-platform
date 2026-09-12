@@ -85,7 +85,16 @@ def extract_text_from_image(image_bytes: bytes, media_type: str = "image/png",
         )
 
     import anthropic
-    client = anthropic.Anthropic(api_key=key)
+    # Explicit timeout (Sept 2026, real bug found live): without one, a
+    # stalled connection just hangs forever with nothing to catch it — a
+    # real ingestion run sat at 0% CPU for 2+ hours mid-call, its socket
+    # to api.anthropic.com still reported ESTABLISHED, no exception ever
+    # raised. 120s is generous for a single-image request (real calls
+    # normally complete in well under 30s) but firmly rules out a
+    # silent, unbounded hang; the SDK's default retry behavior (up to 2
+    # retries) then gets a real chance to kick in once a timeout
+    # actually fires.
+    client = anthropic.Anthropic(api_key=key, timeout=120.0)
     b64_image = base64.standard_b64encode(image_bytes).decode("utf-8")
 
     response = client.messages.create(

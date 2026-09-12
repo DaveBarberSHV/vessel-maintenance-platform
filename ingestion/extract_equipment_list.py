@@ -82,7 +82,9 @@ def extract_equipment(pdf_path: Path, api_key: str = None) -> list[dict]:
     if not key:
         raise ValueError("No ANTHROPIC_API_KEY available.")
 
-    client = anthropic.Anthropic(api_key=key)
+    # Explicit timeout (Sept 2026, real bug found live) — see
+    # vision_extraction.py's client construction for the full story.
+    client = anthropic.Anthropic(api_key=key, timeout=120.0)
 
     # Retry on malformed JSON (Sept 2026, real bug found via two live
     # ingestion runs) — the first failure looked like a max_tokens
