@@ -347,6 +347,22 @@ completed first — see git history for that early build order):**
   browser tab on tap. iOS Safari's native pinch-to-zoom works there,
   making drawings and wiring diagrams readable on a phone. Replaced
   `st.image()` across the entire app with `render_zoomable_image()`.
+- **Retrieval boost for isolation/safety questions** (Sept 2026, see
+  `BACKLOG.md`'s vessel knowledge graph entry) — confirmed directly that
+  semantic search doesn't reliably connect narrative lockout/tagout
+  questions to drawing content, at any `top_k`: a real question about
+  isolating a specific pump never surfaced its own piping schematic in
+  the top 30 results. When a question uses isolation language
+  (`isolate`, `lockout`, `tagout`, `shut off`, `de-energize`,
+  `depressurize`, etc.) and its meaningful keywords match a drawing
+  document's title, `search_dwg_titles_by_keywords()` fetches that
+  document directly and merges it into the semantic results — same
+  spirit as the exact-title DWG bypass above, generalized to a
+  system/safety trigger instead of an exact title match. Verified live:
+  the motivating question now cites the actual fuel oil piping schematic
+  by name and includes real vessel-specific detail (day tank supply/
+  return line sizes) that was completely absent before this existed. No
+  entity graph required.
 
 ## Diagnostic tooling (repo root, run locally — not part of the deployed app)
 

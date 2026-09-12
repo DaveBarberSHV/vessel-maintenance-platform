@@ -131,22 +131,44 @@ proven capturable). General-arrangement/plan-view drawings may need a
 resolution fix (higher render DPI, or tiling extended beyond just
 large-format A0/A1 sheets) before either extraction target works there.
 
-**Recommended before committing to Phase 1:**
-1. Fix the vision-skip threshold bug first (see standalone entry below)
-   — Phase 1 entity extraction is only as good as what actually got
-   ingested, and this bug is silently dropping exactly the pages with the
-   richest tag data.
-2. A smaller, separate, buildable-now win regardless of the graph
-   decision: the real legend/notes content already sitting in DWG chunks
-   like P03 sheet 1 is currently invisible to any question that doesn't
-   happen to match it semantically. A targeted retrieval boost — when a
-   question names a system/equipment and uses isolation/lockout/safety
-   language, directly pull that equipment's DWG-type chunks via the
-   existing `vessel_equipment` lookup rather than relying on semantic
-   similarity — would surface this content with no entity graph required.
-   Same spirit as the existing exact-title DWG bypass
-   (`fetch_chunks_by_title`), generalized to a system/safety trigger
-   instead of an exact title match.
+**Recommended before committing to Phase 1 — both done:**
+1. ✅ Fixed the vision-skip threshold bug (see resolved entry below) —
+   Phase 1 entity extraction is only as good as what actually got
+   ingested, and that bug was silently dropping exactly the pages with
+   the richest tag data.
+2. ✅ Built the smaller, separate, no-graph-required win (Sept 2026): a
+   targeted retrieval boost — when a question uses isolation/lockout/
+   safety language and its keywords match a drawing document's title,
+   `search_dwg_titles_by_keywords()` (retrieval.py) fetches that
+   document directly and merges it into the semantic results, via
+   `add_isolation_dwg_matches()` in `answer_query.py`. Same spirit as the
+   existing exact-title DWG bypass, generalized to a system/safety
+   trigger instead of an exact title match. See `docs/architecture.md`
+   for the full writeup.
+
+**Real, measured result:** re-ran the exact original motivating question
+after building this. Before: a generic answer sourced entirely from
+OMMs, explicitly stating it had nothing document-specific. After: the
+answer now cites the actual fuel oil piping schematic (`P-3`) by name
+and includes real vessel-specific detail that was completely absent
+before — the port day tank's 1½" supply line and ½" return line sizes,
+directly from the drawing. Verified via `--dry-run` that the schematic
+chunks are retrieved (at the `-1.0` exact-match distance sentinel,
+alongside the normal semantic results) and via a real, non-dry-run
+answer that Claude actually used that content substantively, not just
+retrieved-but-ignored. Confirmed no false positives on a control
+question (no isolation language) and a generic isolation question with
+no matchable system keyword — both correctly return zero drawing
+matches and fall through to normal retrieval unchanged.
+
+**What this means for Phase 1:** a meaningful part of the value Phase 1
+was chasing is achievable today, cheaply, with no entity graph at all —
+worth weighing before committing to the larger build. Phase 1 would
+still add something this can't: reasoning about connections *between*
+drawings (e.g. "does isolating this valve also affect the electrical
+panel on E-12"), which a title-keyword match can't do. Whether that
+additional value is worth the additional cost/risk is the real open
+question for the Jared conversation.
 
 **Why this is a competitive differentiator:** No one has built a vessel
 knowledge graph at this level for working tugs. At fleet scale this

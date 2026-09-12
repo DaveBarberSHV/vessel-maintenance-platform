@@ -598,6 +598,81 @@ def keyword_search_chunks(terms: list[str], limit_per_term: int = 20) -> list[di
     return results
 
 
+# Document types that are drawings — the ones semantic search reliably
+# fails to connect to narrative questions (Sept 2026, see BACKLOG.md's
+# vessel knowledge graph entry). A safety/isolation question about "the
+# fuel injection pump" and a piping schematic titled
+# "...FuelOilServicePipingSchematic..." share almost no natural-language
+# overlap in embedding space, even though the schematic is exactly the
+# right answer — confirmed directly: neither appeared in the top 30
+# semantic results for the real motivating question, regardless of
+# top_k. Distinct from document_type values like "O&M Manual" or "Parts
+# List", which are ordinary prose/tables that semantic search handles
+# fine.
+DRAWING_DOCUMENT_TYPES = ("General Arrangement Drawing", "Wiring Diagram")
+
+
+def search_dwg_titles_by_keywords(keywords: list[str], limit_per_keyword: int = 20) -> list[dict]:
+    """Literal title/filename search restricted to drawing-type documents
+    — independent of and complementary to query_chunks()'s semantic
+    search, same spirit as keyword_search_chunks() but matching against
+    document_title/source_file rather than chunk text, since the goal
+    here is finding the right *document*, not the right sentence.
+
+    Real motivating case: "what needs to be isolated to work on the port
+    engine fuel injection pump" — the word "fuel" needs to match
+    `Piping_MBB_P03FuelOilServicePipingSchematic_DWG_Rev0.pdf`'s title,
+    which semantic search doesn't reliably do. Naming convention embeds
+    the descriptive system name directly in the title as one long word
+    ("FuelOilServicePipingSchematic"), so this is a substring match, not
+    a word-boundary one.
+
+    Returns results in the same shape query_chunks() does, with the same
+    -1.0 distance sentinel keyword_search_chunks() uses to mark an exact
+    (non-semantic) match."""
+    if not keywords:
+        return []
+    conn = get_pg_connection()
+    results = []
+    seen_fingerprints = set()
+    placeholders = ", ".join(["%s"] * len(DRAWING_DOCUMENT_TYPES))
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        for kw in keywords:
+            wrapped = f"%{kw}%"
+            cur.execute(
+                f"""
+                SELECT text, document_title, revision, page_number, total_pages,
+                       equipment_model, document_type, source_file, page_image_url
+                FROM {PG_TABLE}
+                WHERE document_type IN ({placeholders})
+                  AND (document_title ILIKE %s OR source_file ILIKE %s)
+                LIMIT %s
+                """,
+                (*DRAWING_DOCUMENT_TYPES, wrapped, wrapped, limit_per_keyword),
+            )
+            for r in cur.fetchall():
+                fingerprint = (r["document_title"], r["page_number"], r["text"][:80])
+                if fingerprint in seen_fingerprints:
+                    continue
+                seen_fingerprints.add(fingerprint)
+                results.append({
+                    "text": r["text"],
+                    "metadata": {
+                        "document_title": r["document_title"],
+                        "revision": r["revision"],
+                        "page_number": r["page_number"],
+                        "total_pages": r["total_pages"],
+                        "equipment_model": r["equipment_model"],
+                        "document_type": r["document_type"],
+                        "source_file": r["source_file"],
+                        "page_image_url": r["page_image_url"],
+                    },
+                    "distance": -1.0,
+                })
+    conn.close()
+    return results
+
+
 def query(question: str, engine: str = "voyage", top_k: int = 5):
     """CLI-facing wrapper: prints results for human inspection."""
     chunks = query_chunks(question, engine=engine, top_k=top_k)

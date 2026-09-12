@@ -22,7 +22,8 @@ import os
 import re
 import sys
 
-from retrieval import query_chunks, extract_code_like_terms, keyword_search_chunks, fetch_chunks_by_title
+from retrieval import (query_chunks, extract_code_like_terms, keyword_search_chunks,
+                        fetch_chunks_by_title, search_dwg_titles_by_keywords)
 
 
 # Real case that motivated this (Aug 2026, Jared's first live test): "We
@@ -331,6 +332,76 @@ def add_exact_code_matches(question: str, chunks: list[dict]) -> list[dict]:
     return chunks + new_matches
 
 
+# Retrieval boost for isolation/safety questions (Sept 2026, see
+# BACKLOG.md's vessel knowledge graph entry). Confirmed directly: a real
+# question about isolating a specific pump never surfaced its own
+# piping schematic anywhere in the top 30 semantic results, regardless
+# of top_k — semantic search doesn't reliably connect narrative
+# lockout/tagout language to drawing content, a structural gap, not a
+# ranking one. This is the smaller, no-graph-required fix recommended
+# alongside that finding: when a question uses isolation language AND
+# names something specific enough to match a drawing's title, pull that
+# drawing's chunks directly rather than hoping semantic search finds it.
+ISOLATION_LANGUAGE_PATTERN = re.compile(
+    r"\b(isolat\w*|lock\s*out|lockout|tag\s*out|tagout|LOTO|"
+    r"shut\s+(off|down)|de-?energi\w*|depressuriz\w*|disconnect\w*)\b",
+    re.IGNORECASE,
+)
+
+# Common words excluded from the keyword match so "the," "engine," or
+# "system" alone don't fire a match against every drawing in the
+# library — deliberately short list, not a full stopword corpus: the
+# goal is filtering out words too generic to mean anything, not
+# filtering aggressively. A missed real keyword just means this
+# question falls through to semantic search alone, same as before this
+# fix existed; a false positive here only costs one extra, harmless
+# drawing lookup — same risk tradeoff as add_exact_code_matches above.
+GENERIC_TERMS_EXCLUDED = {
+    "what", "which", "would", "should", "could", "need", "needs", "needed",
+    "work", "working", "system", "systems", "engine", "engines", "pump",
+    "pumps", "valve", "valves", "with", "this", "that", "these", "those",
+    "isolate", "isolated", "isolation", "before", "while", "there", "their",
+}
+
+
+def find_matching_drawing_chunks(question: str) -> list[dict]:
+    """If the question uses isolation/lockout/safety language, extracts
+    meaningful keywords (4+ letters, not in the generic-terms list) and
+    searches drawing-type document titles directly for them. Returns []
+    if the isolation-language trigger isn't present, or no keyword
+    matches a real drawing title — falls through to normal retrieval
+    unchanged either way, same as find_matching_document_title()
+    above."""
+    if not ISOLATION_LANGUAGE_PATTERN.search(question):
+        return []
+    words = re.findall(r"[A-Za-z]{4,}", question.lower())
+    keywords = [w for w in words if w not in GENERIC_TERMS_EXCLUDED]
+    if not keywords:
+        return []
+    return search_dwg_titles_by_keywords(keywords)
+
+
+def add_isolation_dwg_matches(question: str, chunks: list[dict]) -> list[dict]:
+    """Merges any drawing chunks found by find_matching_drawing_chunks()
+    into the semantic results, de-duped the same way
+    add_exact_code_matches() is — a drawing that already ranked well
+    semantically doesn't get added twice."""
+    drawing_matches = find_matching_drawing_chunks(question)
+    if not drawing_matches:
+        return chunks
+
+    existing_fingerprints = {
+        (c["metadata"]["document_title"], c["metadata"]["page_number"], c["text"][:80])
+        for c in chunks
+    }
+    new_matches = [
+        m for m in drawing_matches
+        if (m["metadata"]["document_title"], m["metadata"]["page_number"], m["text"][:80])
+        not in existing_fingerprints
+    ]
+    return chunks + new_matches
+
+
 def build_prompt(question: str, chunks: list[dict], equipment_context: str = "",
                   previous_exchange: dict | None = None, notes_context: str = "",
                   inventory_context: str = "") -> str:
@@ -498,6 +569,7 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 10,
     else:
         chunks = query_chunks(search_query, engine=engine, top_k=top_k)
         chunks = add_exact_code_matches(question, chunks)
+        chunks = add_isolation_dwg_matches(question, chunks)
 
     equipment_context = ""
     try:
@@ -647,6 +719,7 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
         search_query = expand_units(search_text)
         chunks = query_chunks(search_query, engine=engine, top_k=top_k)
         chunks = add_exact_code_matches(question, chunks)
+        chunks = add_isolation_dwg_matches(question, chunks)
         equipment_context = ""
         try:
             from retrieval import get_pg_connection
