@@ -332,6 +332,46 @@ def add_exact_code_matches(question: str, chunks: list[dict]) -> list[dict]:
     return chunks + new_matches
 
 
+def finalize_chunks(chunks: list[dict]) -> list[dict]:
+    """Deduplicates and sorts the final merged chunk list before it goes
+    into the prompt — real bug found live (Sept 2026, see BACKLOG.md):
+    two separate issues were compounding into visibly wrong-looking
+    Sources lists.
+
+    1. Deduplication previously only happened in format_sources(), for
+       DISPLAY — Claude's actual prompt saw every raw chunk, duplicates
+       included. A real, separate ingestion bug (see BACKLOG.md) wrote
+       the same page's text into multiple chunk_ids, so a single
+       question's top_k=10 semantic results could contain 4+ literal
+       copies of one page — wasting real prompt tokens on redundant
+       content and crowding out other chunks that would otherwise have
+       ranked in the window. Deduping here, on the same
+       (document_title, page_number) key format_sources() already uses,
+       fixes this at the one place both the prompt and the sources list
+       are built from.
+    2. Sorting was entirely absent — query_chunks() returns semantic
+       results in distance order, but add_exact_code_matches() and
+       add_isolation_dwg_matches() append their matches at the end
+       regardless of relevance. A real reported case: the one clearly
+       correct source for a question ended up listed dead last,
+       underneath several barely-related semantic near-misses, because
+       nothing ever re-sorted the merged list. keyword_search_chunks()
+       and search_dwg_titles_by_keywords() both use -1.0 as a deliberate
+       "exact/deterministic match" sentinel, which sorts before any real
+       semantic distance (always >= 0) — so this naturally promotes
+       boosted matches to the top, where they belong."""
+    seen = set()
+    deduped = []
+    for c in chunks:
+        m = c["metadata"]
+        key = (m["document_title"], m["page_number"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(c)
+    return sorted(deduped, key=lambda c: c["distance"])
+
+
 # Retrieval boost for isolation/safety questions (Sept 2026, see
 # BACKLOG.md's vessel knowledge graph entry). Confirmed directly: a real
 # question about isolating a specific pump never surfaced its own
@@ -570,6 +610,7 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 10,
         chunks = query_chunks(search_query, engine=engine, top_k=top_k)
         chunks = add_exact_code_matches(question, chunks)
         chunks = add_isolation_dwg_matches(question, chunks)
+    chunks = finalize_chunks(chunks)
 
     equipment_context = ""
     try:
@@ -720,6 +761,7 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
         chunks = query_chunks(search_query, engine=engine, top_k=top_k)
         chunks = add_exact_code_matches(question, chunks)
         chunks = add_isolation_dwg_matches(question, chunks)
+        chunks = finalize_chunks(chunks)
         equipment_context = ""
         try:
             from retrieval import get_pg_connection

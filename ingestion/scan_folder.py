@@ -615,10 +615,43 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                             tiles)
                         if transcribed:
                             formatted = vision_extraction.format_vision_chunk_text(transcribed)
+
+                            # Assign the combined transcription to exactly
+                            # ONE chunk per page (Sept 2026, real bug found
+                            # live — see BACKLOG.md). chunks_for_page can
+                            # include pre-existing native dense-table
+                            # placeholder chunks (from split_dense_tables()
+                            # finding blank tables via native, pre-vision
+                            # extraction) alongside the primary page chunk.
+                            # Assigning the same formatted text to every one
+                            # of them created up to 23 byte-identical
+                            # duplicate chunks for a single page — confirmed
+                            # directly across the library, 554 duplicate
+                            # chunks across 133 pages. This isn't just
+                            # wasted storage as first assumed: duplicates
+                            # silently consume real top_k retrieval slots
+                            # with redundant copies of the same content,
+                            # directly degrading answer quality (a real,
+                            # reported case: 4 of 10 retrieved chunks for one
+                            # question were identical copies of the same
+                            # page, crowding out other content). The
+                            # placeholders' original purpose — representing
+                            # distinct native tables — is moot once a single
+                            # vision transcription replaces the whole page;
+                            # any real distinct tables *within* that
+                            # transcription are already handled correctly
+                            # and separately below via -visiontableN
+                            # splitting.
+                            primary = next(
+                                (c for c in chunks_for_page if "-densetable" not in c.chunk_id),
+                                chunks_for_page[0],
+                            )
+                            primary.text = formatted
+                            primary.has_text_layer = True
+                            text_chunks.append(primary)
                             for c in chunks_for_page:
-                                c.text = formatted
-                                c.has_text_layer = True
-                                text_chunks.append(c)
+                                if c is not primary and c in file_chunks:
+                                    file_chunks.remove(c)
                             vision_extracted_count += 1
 
                             # Dense-table splitting for vision-transcribed

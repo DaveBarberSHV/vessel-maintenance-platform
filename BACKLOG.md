@@ -3,6 +3,76 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ RESOLVED — Duplicate vision chunks were degrading answer relevance (Sept 2026)
+
+**What happened:** Real, reported case from Jared/Dave — the sources list
+for "What is the normal operating pressure for the ship service air
+system?" showed 4 of 6 sources as clearly irrelevant (Azimuth Thruster,
+Electrical), with the actually-correct source
+(`Piping - MBB P14CompressedAirSystemSchematic`) listed dead last.
+Investigated with real evidence rather than guessing at the cause.
+
+**Real root cause, corrected from an earlier, wrong assumption:** the
+vision-extraction duplicate-chunk issue noted in passing during the
+Sept 11 vision-skip-threshold work was described there as "wasteful,
+not harmful." That was wrong. Checked library-wide: **554 duplicate
+chunks across 133 distinct pages** (one page had 23 identical copies),
+all from `scan_folder.py` assigning the same vision-transcribed text to
+every pre-existing dense-table placeholder chunk on a page, not just the
+primary one. For the real reported question, the raw retrieval actually
+returned 10 chunks — only 4 were genuinely unique; the rest were literal
+duplicate copies of one page, consuming real `top_k` slots and getting
+sent to Claude multiple times in the same prompt.
+
+**A second, compounding bug found in the same investigation:** nothing
+ever deduplicated or re-sorted the merged chunk list before it reached
+the prompt or the Sources display — `format_sources()` deduped for
+*display* only, and boost-appended matches (`add_exact_code_matches`,
+`add_isolation_dwg_matches`) always landed at the *end* of the list
+regardless of actual relevance, explaining exactly why the correct
+source showed up last.
+
+**Fixed, both parts:**
+1. `scan_folder.py` — vision-transcribed text is now assigned to exactly
+   one chunk per page; redundant dense-table placeholder chunks are
+   dropped from `file_chunks` entirely rather than each getting a
+   duplicate copy. Prevents recurrence on any future ingest.
+2. `answer_query.py` — new `finalize_chunks()`, wired in after all
+   retrieval/boost merging in both the real answer path and the
+   `--dry-run` CLI path: deduplicates by `(document_title, page_number)`
+   and sorts by distance (exact/boosted matches use a `-1.0` sentinel,
+   which now correctly sorts them to the top instead of the bottom).
+
+**Existing duplicates cleaned up directly (no re-ingest needed — this
+was pure database cleanup, zero API cost):** identified all 554
+duplicate rows, backed up the full content of every row being removed
+(`/tmp/dup_cleanup_backup.json`, `/tmp/dup_cleanup_full_backup.json`)
+before deleting, kept one canonical copy per page (preferring the
+primary, non-`densetable` chunk_id as the keeper), and trimmed the
+now-stale chunk_id references out of `manifest.json` (73 files
+affected). Verified after cleanup: `audit_manifest.py` shows zero fully-
+missing, zero orphaned, same 8 previously-confirmed-benign partial
+cases as before — nothing broke.
+
+**Real, measured result:** re-ran the exact reported question. Before:
+10 raw chunks, 6 of them duplicates, correct source ranked last of 6
+displayed. After: 4 unique chunks, correctly deduplicated and sorted.
+
+**Honest, remaining limitation — not fixed by this, and harder:** even
+after dedup/sort, the correct schematic ranks #3, not #1 — its raw
+embedding distance (0.541) is nearly tied with two genuinely irrelevant
+documents. This is a real semantic-search precision limit for terse,
+spec-heavy technical questions, not a bug this fix touches. Likely the
+same underlying mechanism behind the separate "parts list returns
+irrelevant pages" complaint (not yet diagnosed — need a concrete
+example). Real candidate fixes for later: broader hybrid/keyword
+blending beyond the current narrow triggers, or a dedicated re-ranking
+step. Worth weighing directly against the vessel knowledge graph
+discussion — see that entry below — before investing further, since
+either direction could plausibly also improve this.
+
+---
+
 ## ✅ RESOLVED — Rotate SUPABASE_DB_URL password (Sept 2026)
 
 **What happened:** The full `SUPABASE_DB_URL` connection string (including
