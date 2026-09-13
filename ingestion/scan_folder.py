@@ -207,6 +207,38 @@ def meaningful_text_length(text: str) -> int:
     return real_chars
 
 
+def is_navigational_page(text: str) -> bool:
+    """True if a page is purely a table of contents or index — a
+    navigational aid pointing to page numbers, not real content that
+    could ever answer a real question.
+
+    Real bug found live (Sept 2026, see BACKLOG.md): a question about
+    isolating a fuel injection pump for maintenance retrieved a CAT parts
+    list's table-of-contents page as a top-3 source. The TOC literally
+    contains the line "PUMP GP-FUEL INJECTION ... 756" — almost the exact
+    words in the question — so it scores deceptively high on semantic
+    similarity despite being a page-number lookup with zero actual
+    isolation-procedure content. A separate index page scored well on a
+    different question purely because it lists "RELAY (24-VOLT)
+    (ISOLATION)" as a part name. These pages have plenty of real,
+    correctly-formed text (they'd pass both the length and
+    is_real_language checks) — the problem isn't that they lack content,
+    it's that their content is structurally incapable of answering
+    anything, and its vocabulary happens to overlap incidentally with
+    real questions.
+
+    Deliberately narrow, checking only the first ~40 characters — the
+    real cases found all open with one of these headings verbatim; a
+    real content page that happens to mention "index" or "contents"
+    somewhere mid-page must not be caught by this, since that would be a
+    real information loss, not a navigational-page exclusion. Confirmed
+    directly: 34 such pages exist across 15 files in the real library,
+    none of which could ever be the source a real engineering question
+    needs."""
+    head = text.strip()[:40].upper()
+    return head.startswith("TABLE OF CONTENTS") or head.startswith("INDEX")
+
+
 def validate_pdf(path: Path) -> tuple[bool, str | None]:
     """Sanity-check a file before processing. Returns (is_valid, issue).
     A file that fails this should be reported clearly and skipped —
@@ -564,6 +596,30 @@ def scan_folder(folder: Path, engine: str = "voyage"):
 
             text_chunks = [c for c in file_chunks if _page_has_real_text(c)]
             no_text_chunks = [c for c in file_chunks if c not in text_chunks]
+
+            # Navigational pages — table of contents / index — excluded
+            # entirely (Sept 2026, real bug found live — see BACKLOG.md
+            # and is_navigational_page()'s docstring). These pages pass
+            # the real-text checks above (plenty of real, well-formed
+            # text), so without this they'd be embedded and searchable —
+            # and their part-name/section vocabulary can incidentally
+            # match real questions despite carrying zero procedural
+            # content. Removed from file_chunks entirely, not just
+            # text_chunks: they must never reach vision extraction either
+            # (nothing useful to add) and must never linger in
+            # manifest.json's chunk_ids for a chunk that was deliberately
+            # never embedded, which would falsely trip audit_manifest.py's
+            # FULLY MISSING check.
+            navigational_pages = {
+                page_number for page_number, c in primary_chunk_by_page.items()
+                if is_navigational_page(c.text)
+            }
+            if navigational_pages:
+                file_chunks = [c for c in file_chunks if c.page_number not in navigational_pages]
+                text_chunks = [c for c in text_chunks if c.page_number not in navigational_pages]
+                no_text_chunks = [c for c in no_text_chunks if c.page_number not in navigational_pages]
+                print(f"  {len(navigational_pages)} table-of-contents/index page(s) "
+                      f"excluded from search (navigational, not real content).")
 
             # Vision extraction for pages with no text layer (Aug 2026) —
             # see setup note above. Each candidate page gets its image

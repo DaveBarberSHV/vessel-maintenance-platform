@@ -3,6 +3,58 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ RESOLVED — Table-of-contents/index pages polluting search results (Sept 2026)
+
+**What happened:** Real, reported case from Dave — a question with
+nothing to do with parts ("What systems would need to be isolated to
+work on the port engine fuel injection pump?") returned the CAT 3512E
+Parts List's table-of-contents page as a top-3 source, with no obvious
+connection to the question. Investigated with real evidence: page 7 of
+that document literally reads *"TABLE OF CONTENTS ... PUMP GP-FUEL
+INJECTION ... 756"* — almost the exact words in the question. A
+separate case (the compressed-air pressure question from earlier the
+same week) surfaced an index page purely because it lists "RELAY
+(24-VOLT) (ISOLATION)" as a part name, matching the question's isolation
+language by pure vocabulary coincidence.
+
+**Real root cause:** these pages have plenty of real, correctly-formed
+text — they pass both the length and `is_real_language` checks fine, so
+nothing existing would catch them. The problem isn't that they lack
+content; it's that their content is structurally incapable of answering
+anything (a page-number lookup table), and its vocabulary — literal
+part/section names — happens to overlap incidentally with real
+engineering questions asked in plain language. Checked library-wide:
+**34 such pages across 15 files**, 27 of them in the CAT 3512E Parts
+List alone (pages 5-8 as "TABLE OF CONTENTS," pages 18-35 as "INDEX").
+
+**Fixed:** `is_navigational_page()` (`scan_folder.py`) detects a page
+whose text opens with "TABLE OF CONTENTS" or "INDEX" (checking only the
+first ~40 characters, deliberately narrow to avoid excluding a real
+content page that happens to mention either word mid-page) and excludes
+it entirely from the searchable corpus — not embedded, not sent to
+vision, not left dangling in `manifest.json`'s tracked chunk_ids.
+Verified directly: 0 false negatives across all 34 known real cases, 0
+false positives across 50 real content-page controls.
+
+**Existing pages cleaned up directly (no re-ingest needed — pure
+database cleanup, zero API cost, same pattern as the duplicate-chunk
+cleanup above):** backed up all 34 rows before deleting
+(`/tmp/toc_cleanup_backup.json`), removed them from `tm_chunks`, trimmed
+the now-stale chunk_id references from `manifest.json` (11 files
+affected). Verified after cleanup: `audit_manifest.py` shows zero
+fully-missing, zero orphaned, same 8 previously-confirmed-benign partial
+cases as before — nothing broke. Deliberately did not reprocess the CAT
+3512E Parts List itself (4,000+ chunks) to pick up the code fix for any
+future edits — this cleanup covers the real, present problem without
+that disproportionate cost; the code fix prevents recurrence on any
+future ingest of this or any other document.
+
+**Real, measured result:** re-ran the exact reported question. The
+Parts List TOC page is completely gone from the top 14 retrieved
+chunks, replaced by more genuinely relevant content.
+
+---
+
 ## ✅ RESOLVED — Duplicate vision chunks were degrading answer relevance (Sept 2026)
 
 **What happened:** Real, reported case from Jared/Dave — the sources list
