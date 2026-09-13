@@ -67,12 +67,54 @@ hypothetical.
 
 ## Future vision, explicitly not being built now
 
-Two real ideas from Dave, worth preserving precisely even though neither
-is being built yet — see their dedicated `BACKLOG.md` entries for full
-detail:
+Several real ideas from Dave, worth preserving precisely even though
+none is being built yet — see their dedicated `BACKLOG.md` entries for
+full detail:
 - **Full-manual download**, with a bandwidth-aware warning before a
   large file downloads — a direct, concrete expression of "their
   library" meaning real, complete access.
 - **Email-based document ingestion** — the real, longer-term vision for
   making it genuinely easy for a vessel owner to keep their library
   current, since most new documents will arrive by email in practice.
+- **Vessel knowledge graph** — cross-referencing interconnected shipboard
+  systems (which electrical circuits and valves tie to which piece of
+  equipment) so Fathom can reason across documents, not just retrieve
+  from one at a time. Real test evidence exists already (see
+  `BACKLOG.md`) — semantic search alone doesn't reliably connect a
+  narrative safety question to the drawing that answers it, which is
+  exactly the gap this would close.
+- **General knowledge documents** — authoritative content that applies
+  broadly across commercial vessels (OEM generic engine/propulsion
+  guidance, general maintenance practice) rather than being specific to
+  Polaris, to fill genuine gaps vessel-specific TMs don't cover.
+- **Regulatory and standards library** — USCG NVICs and Marine Safety
+  Manuals, ABS Rules, SNAME publications, ASTM/SAE standards, NFPA 301,
+  and similar. Real, authoritative value, but a genuinely different risk
+  profile than everything else in this library: licensing/redistribution
+  rights vary a lot by source (USCG material is generally public domain;
+  ASTM/SAE standards are commercial and often prohibit redistribution —
+  needs real verification before any ingestion decision, not an
+  assumption), and regulatory content needs an ongoing currency/update
+  process TMs don't, since a vessel's TMs don't change but the
+  regulations referencing them do.
+- **TSMS / Emergency Response Plan documents** — a related but distinct
+  and much lower-risk idea: McAllister almost certainly already has a
+  Towing Safety Management System and Emergency Response Plan as a
+  Subchapter M regulatory requirement — real, owned, vessel-specific
+  documents, not public standards, so none of the licensing question
+  above applies. Jared is checking on availability (Sept 2026) — if
+  these exist and can be obtained, they should be ingested the same way
+  any other real document is, no new architecture needed.
+
+**Why none of these are being pursued right now (Sept 2026):** a demo to
+McAllister's VP of Engineering is roughly three weeks out, intended to
+secure commitment to a formal pilot — real feedback, real usage metrics,
+and eventually a paid license leading to broader fleet rollout. The one
+thing that demo needs is a system that answers real questions reliably;
+introducing new ingestion capability this close to that meeting risks
+exactly the kind of instability found and fixed repeatedly this same
+week (see `BACKLOG.md`'s Sept 2026 entries) for far less benefit than
+continuing to harden what already exists. The right way to use these
+ideas *before* the demo is as a roadmap story — a well-thought-out
+"here's what's next if you commit" — not as something to rush into the
+product itself.

@@ -264,6 +264,89 @@ each other.
 
 ---
 
+## 🔲 General knowledge documents & regulatory/standards library (Sept 2026 concept)
+
+**What:** Real, authoritative content that applies broadly across
+commercial vessels, not just Polaris — filling genuine gaps
+vessel-specific TMs don't cover, per Jared's feedback that this would
+help engineers get better answers. Two distinct categories, raised
+together but worth keeping separate since they have very different risk
+profiles:
+
+**General OEM/industry knowledge** — CAT's generic diesel engine
+maintenance guides, fuel system troubleshooting guides, coolant/lubricant
+specification documents (apply across an engine family, not just this
+vessel's specific unit); Berg Propulsion technical bulletins on azimuth
+thruster maintenance practice. Same ingestion pipeline as everything
+already in the library. Real, moderate value; lower risk than the
+regulatory category below since this is generally vendor-published
+guidance, not licensed third-party standards.
+
+**Regulatory and standards library** — USCG NVICs and Marine Safety
+Manuals, ABS Rules for Building and Classing, SNAME technical
+publications, ASTM/SAE standards (referenced constantly in OEM manuals
+but rarely reproduced in them), NFPA 301, OCIMF emergency response
+guides, USCG Commandant Instruction M16600.14. Genuinely different risk
+profile, by source:
+- **USCG material** (NVICs, Marine Safety Manuals, Commandant
+  Instructions) — federal publications, generally public domain, likely
+  the safest starting point. Not yet verified directly.
+- **ABS Rules** — some freely downloadable from ABS's own site, but
+  "freely viewable" and "licensed for redistribution in a third-party
+  tool" are not necessarily the same thing. Needs the actual terms of
+  use checked before any ingestion decision, not assumed.
+- **ASTM/SAE standards** — paid, copyrighted, commercial documents
+  ($50–$300+ each) whose licensing terms typically prohibit
+  redistribution or reproduction — which is functionally what a RAG
+  system does when it surfaces excerpts. Real legal question, not an
+  engineering one. The fact that OEM manuals cite these by number rather
+  than reproduce their content is itself a likely clue why.
+- **Commercial PMS/training platforms** (Videotel, Seagull, ABS SAFENET,
+  DNV Veritas frameworks) — a procurement/licensing business decision,
+  not a research question; noted here for completeness, not something to
+  pursue technically without a business case first.
+
+**A real design question this raises regardless of source, not yet
+answered:** once general/regulatory content sits alongside vessel-specific
+TMs, Fathom needs a clear way to distinguish "this is general industry
+guidance" from "this is what's actually approved and installed on this
+vessel" — these can genuinely conflict (a general standard describing an
+ideal practice vs. this vessel's specific approved equipment/procedure).
+Worth deciding deliberately before the library gets more mixed, not as
+an afterthought.
+
+**Why not now:** see `product_vision.md`'s "Future vision" section —
+this needs real licensing verification (USCG/ABS at minimum) before any
+ingestion decision, and that research plus the ingestion work itself is
+deliberately being held until after the Sept 2026 VP demo, so effort
+stays on hardening reliability rather than adding new capability risk
+this close to it.
+
+---
+
+## 🔲 TSMS / Emergency Response Plan documents — pending Jared (Sept 2026)
+
+**What:** McAllister almost certainly already has a Towing Safety
+Management System and an Emergency Response Plan (including Fire and
+Emergency Drills procedures) as a real, existing regulatory requirement
+under 46 CFR Subchapter M for ATB operators — not something to build or
+license, something to *obtain*. Real, owned, vessel-specific documents,
+so none of the licensing uncertainty in the entry above applies; same
+ingestion pipeline as every other real document already in the library.
+
+**Status:** Dave has asked Jared to check on availability (Sept 2026).
+Tracked here specifically so this doesn't slip while waiting on his
+answer — separate from the bigger general-knowledge/regulatory-library
+strategic question above, since this one is a much smaller, lower-risk,
+likely-quick win if the documents exist and can be obtained in time.
+
+**If they arrive before the VP demo:** worth ingesting promptly — unlike
+the broader regulatory library, this directly strengthens the actual
+demo goal (reliable, comprehensive answers specific to this vessel)
+rather than adding new capability risk.
+
+---
+
 ## 🔲 Chief Engineer approval step in rename workflow (Sept 2026)
 
 **What:** The current rename flow is Dave-reviews-and-approves. The
