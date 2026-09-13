@@ -58,6 +58,22 @@ cases as before — nothing broke.
 10 raw chunks, 6 of them duplicates, correct source ranked last of 6
 displayed. After: 4 unique chunks, correctly deduplicated and sorted.
 
+**A real bug in this fix itself, caught the same day by re-testing
+after the DB cleanup:** the first version deduped `finalize_chunks()` by
+`(document_title, page_number)` alone — too coarse. `split_dense_tables()`
+legitimately produces multiple distinct, real chunks from one page (a
+real case: the main page text, rows 1-6 of a 9-row spec table, and rows
+7-9 — the last one holding the exact pressure value a real question
+needed). Deduping by page number alone silently discarded two of those
+three real chunks, treating "same page" as "same content" when it isn't.
+Corrected to fingerprint on `(document_title, page_number, text[:80])`,
+matching the exact convention `add_exact_code_matches()` and
+`add_isolation_dwg_matches()` already use for their own de-dup. Verified
+directly: re-ran the same question — all 10 genuinely distinct chunks
+in the top_k window now survive, including both real
+`DEFTIER4AFTERTREATMENTGUIDE` sub-chunks. Only chunks with truly
+identical text collapse together now.
+
 **Honest, remaining limitation — not fixed by this, and harder:** even
 after dedup/sort, the correct schematic ranks #3, not #1 — its raw
 embedding distance (0.541) is nearly tied with two genuinely irrelevant

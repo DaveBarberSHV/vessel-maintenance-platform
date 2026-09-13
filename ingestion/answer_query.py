@@ -345,10 +345,22 @@ def finalize_chunks(chunks: list[dict]) -> list[dict]:
        question's top_k=10 semantic results could contain 4+ literal
        copies of one page — wasting real prompt tokens on redundant
        content and crowding out other chunks that would otherwise have
-       ranked in the window. Deduping here, on the same
-       (document_title, page_number) key format_sources() already uses,
-       fixes this at the one place both the prompt and the sources list
-       are built from.
+       ranked in the window.
+
+       Fingerprint is (document_title, page_number, text[:80]) — NOT
+       just (document_title, page_number) — matching the exact
+       convention add_exact_code_matches() and add_isolation_dwg_matches()
+       already use for their own de-dup, and for a real reason found
+       live: a single page can legitimately hold multiple genuinely
+       different chunks (split_dense_tables() deliberately splits a
+       dense table into several row-range sub-chunks — a real case had
+       three distinct, real chunks all from one page: the main prose,
+       rows 1-6 of a spec table, and rows 7-9, the latter containing the
+       exact pressure value a real question needed). Deduping by page
+       number alone would have silently discarded two of those three,
+       losing real content rather than removing a real duplicate. Only
+       chunks with genuinely identical text collapse together; distinct
+       sub-chunks from the same page all survive.
     2. Sorting was entirely absent — query_chunks() returns semantic
        results in distance order, but add_exact_code_matches() and
        add_isolation_dwg_matches() append their matches at the end
@@ -364,7 +376,7 @@ def finalize_chunks(chunks: list[dict]) -> list[dict]:
     deduped = []
     for c in chunks:
         m = c["metadata"]
-        key = (m["document_title"], m["page_number"])
+        key = (m["document_title"], m["page_number"], c["text"][:80])
         if key in seen:
             continue
         seen.add(key)
