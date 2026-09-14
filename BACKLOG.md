@@ -3,6 +3,55 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ RESOLVED — Multi-page procedures retrieved out of page order (Sept 2026)
+
+**What happened:** Real, reported case from Dave during pre-demo QA testing
+(`docs/qa_test_questions.md` Q4) — "Walk me through the procedure to change
+the fuel filters on the main engine." The real procedure spans 5 contiguous
+O&M Manual pages (173 Primary Filter/Water Separator, 174–176 Secondary
+Filter, 177 Fumes Disposal Filter). All 5 pages were genuinely retrieved
+(confirmed live at `top_k=10`, the real production default), but scrambled
+by independent per-chunk distance (175, 176, 173, 174, 177 instead of reading
+order) — Claude then wrote the answer in that same scrambled order, leading
+with the Secondary Filter procedure and trailing off with Primary Filter
+almost cut off, even though every individual fact was accurate. Two off-topic
+pages (165, Engine Oil Filter; 171, DEF Filter Screen) were also interleaved
+into the Sources list.
+
+**Root cause:** each page's chunk is scored independently by its own
+embedding distance, with nothing in `finalize_chunks()` aware that
+consecutive pages of the same document are frequently one continuous
+procedure.
+
+**Fixed:** `_reorder_page_sequences()` in `answer_query.py`, called at the
+end of `finalize_chunks()` — after the existing distance sort, finds runs of
+strictly consecutive pages (page N, N+1, N+2, ...) within the same document
+and re-sorts just those runs by page number, anchored at the run's
+best-ranked member's original position. Chunks outside any run are
+untouched.
+
+**Verified live, the real motivating question, at real production `top_k=10`:**
+Sources now read 171→177 in correct page order (previously scrambled), with
+page 165 cleanly separated at the end instead of interleaved in the middle.
+The generated answer itself now correctly leads with **Primary Filter/Water
+Separator**, then **Secondary Filters** — matching the manual's own
+structure — where before it led with Secondary and nearly cut off Primary
+entirely.
+
+**Known, disclosed trade-off, not solved by this fix:** page adjacency alone
+can't distinguish "still the same procedure, continued on the next page"
+from "the manual's next, unrelated procedure happens to start on the very
+next page." Confirmed real case: page 171 ("Filter Screen (DEF) -
+Inspect/Clean," a different system entirely) is strictly adjacent to page
+172 and gets folded into the same ordered run. It's no longer scrambled into
+the *middle* of the real sequence (an improvement on its own), but it isn't
+excluded either. That's the same underlying precision problem as the entry
+below (vocabulary overlap causing an unrelated page to rank as relevant) —
+this fix only reorders what's already being retrieved, it doesn't change
+what qualifies for retrieval.
+
+---
+
 ## 🔲 Cover pages and undersized fluid-spec tables ranking above the real answer (Sept 2026)
 
 **What happened:** Real, reported case from Dave during pre-demo QA testing

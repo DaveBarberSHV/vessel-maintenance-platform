@@ -21,6 +21,7 @@ Usage:
 import os
 import re
 import sys
+from collections import defaultdict
 
 from retrieval import (query_chunks, extract_code_like_terms, keyword_search_chunks,
                         fetch_chunks_by_title, search_dwg_titles_by_keywords)
@@ -381,7 +382,84 @@ def finalize_chunks(chunks: list[dict]) -> list[dict]:
             continue
         seen.add(key)
         deduped.append(c)
-    return sorted(deduped, key=lambda c: c["distance"])
+    ordered = sorted(deduped, key=lambda c: c["distance"])
+    return _reorder_page_sequences(ordered)
+
+
+def _reorder_page_sequences(ordered: list[dict], max_gap: int = 1) -> list[dict]:
+    """Real bug found live (Sept 2026, see BACKLOG.md): a real multi-page
+    procedure (the CAT 3512E fuel filter change, pages 173-177) retrieved
+    completely intact — every real page was in the top_k window — but in
+    scrambled order (175, 176, 173, 174, 177), because each page's chunk is
+    scored independently by its own embedding distance, with no awareness
+    that consecutive pages of the same document are often one continuous
+    procedure. Claude then wrote the answer in that same scrambled order
+    (leading with the Secondary Filter procedure, Primary Filter trailing
+    in almost last), even though the content itself was accurate.
+
+    Fix: after the existing distance sort, find runs of STRICTLY
+    consecutive pages (page N, N+1, N+2, ... — max_gap=1, deliberately the
+    narrowest possible definition of "a sequence," not a guessed-at
+    leniency) within the same document, and re-sort just those runs by
+    page number — anchored at the position of the run's best-ranked
+    (lowest-distance) member, so the run's overall placement relative to
+    everything else is unaffected, only the reading order *within* it.
+    Chunks not part of any run keep their original relevance-ranked
+    position untouched.
+
+    Known, disclosed trade-off, not solved by this fix: page adjacency
+    alone can't tell "still the same procedure, continued" from "the
+    manual's next, unrelated procedure happens to start on the very next
+    page" (confirmed real case: page 171, "Filter Screen (DEF) -
+    Inspect/Clean," is strictly adjacent to page 172 and gets pulled into
+    the same run even though it's a different system entirely). That's a
+    real precision problem, but a separate one — see the standalone
+    BACKLOG.md entry for pages ranking above the real answer due to
+    vocabulary overlap. This fix only reorders what's already being
+    retrieved; it doesn't change what qualifies for retrieval."""
+    doc_pages = defaultdict(set)
+    for c in ordered:
+        m = c["metadata"]
+        doc_pages[m["document_title"]].add(m["page_number"])
+
+    # (document_title, page_number) -> run key (the run's own first page),
+    # only recorded for pages that are part of a real run of 2+ consecutive
+    # pages — an isolated page is left out of this map entirely.
+    run_of_page = {}
+    for doc_title, pages in doc_pages.items():
+        pages_sorted = sorted(pages)
+        run = [pages_sorted[0]]
+        for p in pages_sorted[1:]:
+            if p - run[-1] <= max_gap:
+                run.append(p)
+            else:
+                if len(run) > 1:
+                    for rp in run:
+                        run_of_page[(doc_title, rp)] = (doc_title, run[0])
+                run = [p]
+        if len(run) > 1:
+            for rp in run:
+                run_of_page[(doc_title, rp)] = (doc_title, run[0])
+
+    orig_index = {id(c): i for i, c in enumerate(ordered)}
+    result = []
+    emitted_runs = set()
+    for c in ordered:
+        m = c["metadata"]
+        run_key = run_of_page.get((m["document_title"], m["page_number"]))
+        if run_key is None:
+            result.append(c)
+            continue
+        if run_key in emitted_runs:
+            continue
+        emitted_runs.add(run_key)
+        run_chunks = [
+            cc for cc in ordered
+            if run_of_page.get((cc["metadata"]["document_title"], cc["metadata"]["page_number"])) == run_key
+        ]
+        run_chunks.sort(key=lambda cc: (cc["metadata"]["page_number"], orig_index[id(cc)]))
+        result.extend(run_chunks)
+    return result
 
 
 # Retrieval boost for isolation/safety questions (Sept 2026, see
