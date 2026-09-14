@@ -20,16 +20,24 @@ dependency." Don't assume prior familiarity with a tool just because it
 came up once before — a quick reminder of the exact syntax is always
 welcome, not condescending.
 
-## How to hand off files
+## File access — depends which Claude interface this is
 
-Claude cannot write directly to Dave's machine — every code change goes
-through: Claude creates/edits the file → `present_files` shares it →
-Dave clicks it, confirms it landed in Downloads (`ls -la ~/Downloads | grep <name>`) →
-Dave moves it into place with `mv`. **Do this one file at a time when
-multiple files changed**, not all at once — confirm each one landed
-before sharing the next. This has caused real, wasted round-trips before
-when skipped (a file got missed in the shuffle and Dave spent a while
-debugging a "bug" that was actually just an unmoved file).
+**Updated Sept 2026:** Dave now primarily works in **Claude Code** (the CLI,
+running directly in his own terminal), not Claude Chat. This is a real,
+important difference, not a cosmetic one: Claude Code has direct Read/Edit/
+Write access to files on Dave's actual machine, and a real Bash tool that
+executes commands directly in his real environment (same filesystem, same
+git repo, same running processes) — there is no copy/paste or file hand-off
+step at all. Edit or write the file directly, then follow the "before
+committing anything" rule below.
+
+The paragraph that used to be here (Claude creates a file → `present_files`
+→ Dave downloads it → Dave moves it into place with `mv`) described the
+**old Claude Chat workflow**, where Claude had no execution access at all.
+That workflow no longer applies to Claude Code sessions. If a fresh session
+somehow turns out to be Claude Chat again (no Bash/file tools available),
+fall back to that hand-off pattern — but Claude Code is the real, current
+default as of Sept 2026.
 
 ## Before committing anything
 
@@ -69,8 +77,6 @@ command response.
 **The rules:**
 - Never ask Dave to `echo $SUPABASE_DB_URL` or any other credential
 - Never ask Dave to paste `cat ~/.streamlit/secrets.toml`
-- When giving export commands, always use `"..."` placeholders:
-  `export SUPABASE_DB_URL="..."` — Dave fills in the value locally
 - If a credential appears in chat, flag it immediately and prompt a
   rotation — don't let it slide even for one more message
 - Verification commands that don't expose credentials are fine:
@@ -81,6 +87,43 @@ output to share results, the Terminal font is very small, multi-line
 output is hard to review quickly, and credentials get buried in export
 commands that look like innocuous setup steps. Claude needs to be the
 guard here, not Dave.
+
+**Real incident, Claude Code specifically (Sept 14, 2026):** the old
+`export SUPABASE_DB_URL="..."` placeholder pattern above was written for
+Claude Chat, where Dave had to type the real command back to Claude for
+Claude to "see" it ran — which meant the real value passed through the
+chat transcript every time. Under Claude Code this is both unnecessary and
+actively dangerous: Claude's Bash tool runs directly in Dave's real
+environment, so once credentials are in the process environment, Claude
+can already use them in every command with no export step from Dave at
+all. Asking Dave to type an `export VAR="real-value"` line through
+Claude Code (even via the `!` prefix) puts the real value in the
+conversation transcript exactly like pasting it — confirmed the hard way
+this session, when all three of `SUPABASE_DB_URL`, `ANTHROPIC_API_KEY`,
+and `VOYAGE_API_KEY` ended up in chat this way.
+
+**The fix, going forward — a one-time setup, never repeated:**
+1. Dave creates a dedicated file (e.g. `~/.fathom_env`, outside the repo)
+   containing the three real `export VAR="..."` lines — typed directly in
+   an ordinary Terminal window that has no connection to Claude Code at
+   all, never through the `!` prefix or any command Claude runs.
+2. `chmod 600 ~/.fathom_env` so only Dave can read it.
+3. Before starting (or resuming) a Claude Code session for this project,
+   Dave runs `source ~/.fathom_env && claude` (or `claude --resume`) from
+   that same terminal — the new session's process inherits the
+   credentials automatically.
+4. From then on, Claude verifies credentials are present with
+   `printenv VAR_NAME > /dev/null && echo set` (reports set/missing only,
+   never the value) — Claude should never again construct a command that
+   requires Dave to type a real secret value anywhere Claude can see it,
+   including through `!`.
+
+**Why this couldn't just be typed "right here, right now" mid-session:**
+environment variables are inherited by a process only at the moment it
+starts — exporting them in a different terminal window, or in the same
+window after Claude Code already launched, doesn't reach an
+already-running session. The session has to be (re)started *after*
+`~/.fathom_env` is sourced for this to work.
 
 ## General working pattern that's worked well
 

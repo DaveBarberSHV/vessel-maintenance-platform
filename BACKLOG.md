@@ -3,6 +3,65 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## 🔲 Cover pages and undersized fluid-spec tables ranking above the real answer (Sept 2026)
+
+**What happened:** Real, reported case from Dave during pre-demo QA testing
+(`docs/qa_test_questions.md` Q1) — "What type and grade of engine oil does the
+CAT 3512E use?" The answer itself was correct and well-cited (Cat DEO-ULS,
+Cat ECF-3/API CJ-4, the four SAE viscosity grades by ambient temp), but the
+Sources list looked wrong: two of ten entries were the O&M Manual's and Parts
+List's cover/title pages, plus an engine specs table (bore/stroke/RPM) and an
+unrelated DEF aftertreatment guide page — none of which say anything about oil
+grade — while the two pages that actually answer the question ranked near the
+bottom of the displayed list.
+
+**Confirmed directly, not assumed — this is not a sorting bug.**
+`finalize_chunks()` already sorts correctly by real distance (verified in
+code and live). The real oil-grade content
+(`MainEngines - CAT 3512E O&M Manual`, pages 131–132, "Fluid Recommendations")
+was confirmed present via a direct chunk-content search, then confirmed via a
+real `query_chunks(top_k=40)` call to rank **8th (distance 0.5092) and 10th
+(distance 0.5152)** for this exact question — genuinely low embedding
+similarity, not a display-order problem. Ranks 1–7 and 9 (distances
+0.4335–0.5114) are a bare engine-specs table, both documents' cover pages, two
+"model view illustration" caption pages, an unrelated DEF guide page, and an
+overhaul-interval schedule — all sharing surface vocabulary ("Cat," "3512E,"
+"engine," "oil filler") with the question but containing zero actual oil-grade
+content.
+
+**Root cause, two distinct contributing factors:**
+1. **Cover/title pages have no real answering value for any technical
+   question**, but nothing currently excludes them from the searchable corpus
+   the way `is_navigational_page()` already excludes Table-of-Contents/Index
+   pages (see the resolved entry below) — this is the same category of
+   problem, just a different page type.
+2. **The real oil-grade table is diluted by its surrounding chunk.** Page 132
+   packs the 4-row SAE viscosity table in among a large amount of unrelated
+   adjacent text (DPF/SCR system descriptions, the S·O·S Oil Analysis
+   program, legal boilerplate about recommendations "subject to change").
+   The existing dense-table-splitting logic (`split_dense_tables()`) only
+   fires above 8 data rows — this table has 4, so it never gets pulled into
+   its own tightly-scoped chunk the way a larger table would.
+
+**Two real, scoped candidate fixes, not yet built:**
+1. Extend `is_navigational_page()` (or a sibling check) to also exclude
+   cover/title pages from the searchable corpus — same reasoning as the
+   already-resolved TOC/Index fix: "does this document exist" is handled
+   separately by the Document Library inventory list injected into every
+   prompt, so removing cover pages from retrieval loses nothing.
+2. Lower the dense-table split threshold (or add a targeted rule for short
+   fluid-spec/lubricant tables specifically) so a table like this one gets
+   its own chunk instead of sitting buried inside a large mixed page.
+
+**Why deferred for now:** Dave's explicit call — worth watching whether this
+same pattern (cover pages/short spec tables ranking above the real answer)
+recurs across the rest of the 47-question QA pass (`docs/qa_test_questions.md`)
+before spending build time, since a second real example would make the case
+for the fix (and its exact scope) stronger. Revisit after the QA pass, or
+sooner if this shows up again.
+
+---
+
 ## ✅ RESOLVED — Table-of-contents/index pages polluting search results (Sept 2026)
 
 **What happened:** Real, reported case from Dave — a question with
