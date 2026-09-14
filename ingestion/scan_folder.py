@@ -239,6 +239,49 @@ def is_navigational_page(text: str) -> bool:
     return head.startswith("TABLE OF CONTENTS") or head.startswith("INDEX")
 
 
+def is_cover_page(text: str, page_number: int, total_pages: int) -> bool:
+    """True if this is a document's own cover/title page — same category
+    of problem as is_navigational_page() above (real, well-formed text
+    that's structurally incapable of answering anything), but for a
+    different, more common page type: a manual's title page.
+
+    Real bug found live (Sept 2026, see BACKLOG.md, two separate real QA
+    questions): the CAT 3512E O&M Manual's page 1 ("Operation and
+    Maintenance Manual, 3500E Marine Engines...") and the CAT 3512E Parts
+    List's page 1 ("Parts Manual, 3512E Marine Engine...") both ranked
+    among the top sources for real technical questions ("what oil grade,"
+    "what's the service interval") ahead of the pages that actually answer
+    them — purely because the model/engine name in the question matches
+    the cover page's own title text closely.
+
+    Calibrated directly against the real library, not guessed at (Sept
+    2026): surveyed every document's own page-1 chunk length against that
+    document's total page count. A short page-1 chunk alone isn't a safe
+    signal — several real, single- or few-page reference documents (e.g. a
+    1-page pressure-tank spec sheet, a 2-page thruster data sheet) have
+    genuinely short page-1 text that IS their entire real content, and
+    must never be excluded. What actually, reliably distinguishes a cover
+    page in this library: it's short AND sits at the front of a
+    genuinely long document — a real cover page's own text never carries
+    the document's real technical content regardless of how many more
+    pages follow, whereas a short document's page 1 usually *is* the
+    content. Confirmed against every real page-1 chunk in the library at
+    the time this was written: this exact rule matches every known real
+    cover page found live and preserves every genuinely short real-content
+    document (equipment lists, single-page spec sheets, alignment
+    guidelines) with no false positives.
+
+    Deliberately conservative on both thresholds — `total_pages > 20`
+    (only applies to genuinely book-length manuals, never a short
+    reference doc or training deck) and `< 500` meaningful characters
+    (real cover pages surveyed ran 64-450 characters; several legitimate
+    multi-page technical cover-ish pages ran 500+ and are deliberately
+    left alone rather than risk a real information loss)."""
+    if page_number != 1 or total_pages <= 20:
+        return False
+    return meaningful_text_length(text) < 500
+
+
 def validate_pdf(path: Path) -> tuple[bool, str | None]:
     """Sanity-check a file before processing. Returns (is_valid, issue).
     A file that fails this should be reported clearly and skipped —
@@ -620,6 +663,24 @@ def scan_folder(folder: Path, engine: str = "voyage"):
                 no_text_chunks = [c for c in no_text_chunks if c.page_number not in navigational_pages]
                 print(f"  {len(navigational_pages)} table-of-contents/index page(s) "
                       f"excluded from search (navigational, not real content).")
+
+            # Cover/title pages — same real problem as navigational pages
+            # above, a different page type (Sept 2026, real bug found live
+            # — see BACKLOG.md and is_cover_page()'s docstring). A
+            # document's own title page ranking above the pages that
+            # actually answer a question, purely because it repeats the
+            # model/manufacturer name the question also uses.
+            total_pages_for_file = file_chunks[0].total_pages if file_chunks else 0
+            cover_pages = {
+                page_number for page_number, c in primary_chunk_by_page.items()
+                if is_cover_page(c.text, page_number, total_pages_for_file)
+            }
+            if cover_pages:
+                file_chunks = [c for c in file_chunks if c.page_number not in cover_pages]
+                text_chunks = [c for c in text_chunks if c.page_number not in cover_pages]
+                no_text_chunks = [c for c in no_text_chunks if c.page_number not in cover_pages]
+                print(f"  {len(cover_pages)} cover/title page(s) "
+                      f"excluded from search (no real technical content).")
 
             # Vision extraction for pages with no text layer (Aug 2026) —
             # see setup note above. Each candidate page gets its image

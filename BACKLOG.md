@@ -87,7 +87,7 @@ what qualifies for retrieval.
 
 ---
 
-## 🔲 Cover pages and undersized fluid-spec tables ranking above the real answer (Sept 2026)
+## ✅ RESOLVED (cover pages) / 🔲 OPEN (undersized fluid-spec tables) — pages ranking above the real answer (Sept 2026)
 
 **What happened:** Real, reported case from Dave during pre-demo QA testing
 (`docs/qa_test_questions.md` Q1) — "What type and grade of engine oil does the
@@ -127,22 +127,46 @@ content.
    fires above 8 data rows — this table has 4, so it never gets pulled into
    its own tightly-scoped chunk the way a larger table would.
 
-**Two real, scoped candidate fixes, not yet built:**
-1. Extend `is_navigational_page()` (or a sibling check) to also exclude
-   cover/title pages from the searchable corpus — same reasoning as the
-   already-resolved TOC/Index fix: "does this document exist" is handled
-   separately by the Document Library inventory list injected into every
-   prompt, so removing cover pages from retrieval loses nothing.
-2. Lower the dense-table split threshold (or add a targeted rule for short
-   fluid-spec/lubricant tables specifically) so a table like this one gets
-   its own chunk instead of sitting buried inside a large mixed page.
+**Fix #1, cover/title pages — built and shipped (Sept 2026), triggered by a
+real second occurrence:** the same pattern recurred on a different real QA
+question ("What is the service interval for the CAT 3512E engine oil
+change?" — the O&M Manual's and Parts List's cover pages again ranked #1/#2
+above the real Table 45 sump-interval content), confirming this was worth
+fixing rather than continuing to watch for it. `is_cover_page()` added to
+`scan_folder.py`, same exclusion pipeline as the existing TOC/Index check.
+Calibrated directly against the real library (not guessed at): a page is
+excluded only if it's page 1 of a document with **more than 20 total
+pages** AND has **under 500 characters** of real (`meaningful_text_length()`)
+content — a true cover page never carries real content regardless of
+document length, while a short document's page 1 is usually its actual
+content. Verified against every real page-1 chunk in the library with zero
+false positives (correctly preserves real single/few-page documents like a
+1-page pressure-tank spec sheet and a 2-page thruster data sheet, and a
+22-page alignment guideline whose page 1 is genuinely substantial).
 
-**Why deferred for now:** Dave's explicit call — worth watching whether this
-same pattern (cover pages/short spec tables ranking above the real answer)
-recurs across the rest of the 47-question QA pass (`docs/qa_test_questions.md`)
-before spending build time, since a second real example would make the case
-for the fix (and its exact scope) stronger. Revisit after the QA pass, or
-sooner if this shows up again.
+Live cleanup performed the same day, same pattern as the TOC/Index cleanup
+below: 12 real cover-page rows confirmed present in production `tm_chunks`
+across 12 documents (both CAT 3512E cases plus AzimuthThruster, Clutch,
+PropulsionControl, FuelOil, and Piping O&M/Parts List cover pages, and 4 CAT
+DEF training-doc title pages), backed up in full
+(`/tmp/cover_page_cleanup_backup.json`) before deleting, then removed from
+`tm_chunks` and trimmed from `manifest.json`. Verified after cleanup:
+`audit_manifest.py` shows only the same pre-existing, already-confirmed-benign
+partial gaps as before (`MainEngines_CAT_3512E_OMM_Rev11012021.pdf`'s p214 and
+`MainEngines_CAT_3512E_PartsList_Rev07012021.pdf`'s p2/p1413 — unrelated blank/
+logo-only pages, not touched by this cleanup) — nothing else broke. Applies
+automatically to any future ingestion or re-ingestion, not just today's 12
+documents — the code fix lives in the same pipeline every ingest path
+already runs through.
+
+**Fix #2, undersized fluid-spec tables diluted by their surrounding
+chunk — still open.** Lower the dense-table split threshold (or add a
+targeted rule for short fluid-spec/lubricant tables specifically) so a
+table like the 4-row oil-viscosity table gets its own chunk instead of
+sitting buried inside a large mixed page. Deferred for now — worth watching
+whether this specific pattern recurs across the rest of the 47-question QA
+pass before spending build time on it, same reasoning as before, now that
+the cover-page half of this entry is resolved.
 
 ---
 
