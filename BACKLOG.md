@@ -3,6 +3,41 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ RESOLVED (pending Dave's live confirmation) — New answer renders below the visible viewport (Sept 2026)
+
+**What happened:** Real, reported case from Dave during pre-demo QA testing —
+on a conversation with some history, asking a new question and hitting enter
+left the new answer rendered below the current scroll position, with no
+visual change in the visible window. Real, live consequence: Dave assumed
+the question hadn't been entered and submitted it a second time before
+realizing he just needed to scroll down.
+
+**Root cause:** Streamlit doesn't auto-scroll the page when new chat content
+renders — the page just grows taller, and the browser leaves the viewport
+wherever it was.
+
+**Fixed:** `app.py` — a small `streamlit.components.v1.html()` script,
+scoped to fire only inside the `if question:` block right after a new
+answer is rendered (never on every rerun — an expander toggle elsewhere in
+the page also triggers a Streamlit rerun, and force-scrolling on those would
+be its own, different annoyance). Scrolls the page to the bottom, retried
+twice more a few hundred ms later since page images below the answer can
+still be loading asynchronously at that exact moment, which would otherwise
+leave the scroll short of the true bottom.
+
+**Not independently browser-verified before deploy — a real, disclosed gap,
+not an oversight:** Claude has no browser/screenshot tool in this
+environment, so this couldn't be visually confirmed the way the mobile
+sidebar CSS bug below should have been the first time. Local testing was
+attempted but blocked by an unrelated local credential mismatch (likely a
+typo in Dave's own `~/.fathom_env`, not a real Supabase issue). Dave's
+explicit call: push and verify directly against the live deployed app
+instead of blocking on local testing. **Needs Dave's real confirmation, on
+both desktop and mobile** (per the exact lesson from the CSS bug below),
+before this entry is considered fully resolved rather than provisionally so.
+
+---
+
 ## ✅ RESOLVED — Multi-page procedures retrieved out of page order (Sept 2026)
 
 **What happened:** Real, reported case from Dave during pre-demo QA testing

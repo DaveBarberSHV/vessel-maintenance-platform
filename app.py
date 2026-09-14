@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ingestion/ isn't a proper installed package — it's a folder of scripts,
 # same as the CLI tools use it. Resolve the path from this file's own
@@ -693,3 +694,31 @@ if question:
 
         st.session_state.messages.append(new_message)
         render_assistant_message(new_message, key_prefix=f"live_{new_message.get('id', len(st.session_state.messages))}")
+
+        # Real, reported problem (Sept 2026, see BACKLOG.md): Streamlit
+        # doesn't auto-scroll the page after a new chat message renders —
+        # on a long conversation, the new answer lands below the current
+        # viewport, so the question looks like it did nothing, and the
+        # natural reaction is to submit it again. Scoped to fire only here
+        # (right after a genuinely new question was just answered), never
+        # on every rerun — an expander toggle elsewhere in the page also
+        # triggers a rerun, and force-scrolling on those would be its own,
+        # different annoyance. Retried a couple of times after the initial
+        # scroll (not just once) because page images below the answer can
+        # still be loading asynchronously at this point, which would
+        # otherwise leave the scroll short of the true bottom.
+        components.html(
+            """
+            <script>
+                function scrollChatToBottom() {
+                    var d = window.parent.document;
+                    d.documentElement.scrollTop = d.documentElement.scrollHeight;
+                    d.body.scrollTop = d.body.scrollHeight;
+                }
+                scrollChatToBottom();
+                setTimeout(scrollChatToBottom, 300);
+                setTimeout(scrollChatToBottom, 800);
+            </script>
+            """,
+            height=0,
+        )
