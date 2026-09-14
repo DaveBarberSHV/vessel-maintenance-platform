@@ -703,21 +703,35 @@ if question:
         # (right after a genuinely new question was just answered), never
         # on every rerun — an expander toggle elsewhere in the page also
         # triggers a rerun, and force-scrolling on those would be its own,
-        # different annoyance. Retried a couple of times after the initial
-        # scroll (not just once) because page images below the answer can
-        # still be loading asynchronously at this point, which would
-        # otherwise leave the scroll short of the true bottom.
+        # different annoyance.
+        #
+        # Real follow-up bug, reported live (Sept 2026): a fixed set of
+        # retries (0/300/800ms) wasn't enough when an earlier message's
+        # "View Sources" expander was left open — its page images add real,
+        # variable-timing height to the page independent of the new
+        # answer's own content, so a fixed retry schedule can fire its last
+        # attempt before that height settles, landing short of the true
+        # bottom. Replaced with a MutationObserver that re-scrolls on any
+        # DOM change (a late image finishing load, anything) for a 2.5s
+        # window, then disconnects itself — self-adjusting to real,
+        # variable page-settling time instead of guessing at fixed delays.
+        # Disconnecting after 2.5s is deliberate: an open-ended observer
+        # would keep fighting the user if they manually scroll up to read
+        # something shortly after asking a question.
         components.html(
             """
             <script>
-                function scrollChatToBottom() {
+                (function() {
                     var d = window.parent.document;
-                    d.documentElement.scrollTop = d.documentElement.scrollHeight;
-                    d.body.scrollTop = d.body.scrollHeight;
-                }
-                scrollChatToBottom();
-                setTimeout(scrollChatToBottom, 300);
-                setTimeout(scrollChatToBottom, 800);
+                    function scrollChatToBottom() {
+                        d.documentElement.scrollTop = d.documentElement.scrollHeight;
+                        d.body.scrollTop = d.body.scrollHeight;
+                    }
+                    scrollChatToBottom();
+                    var observer = new MutationObserver(scrollChatToBottom);
+                    observer.observe(d.body, {childList: true, subtree: true, attributes: true});
+                    setTimeout(function() { observer.disconnect(); }, 2500);
+                })();
             </script>
             """,
             height=0,

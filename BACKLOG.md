@@ -3,7 +3,7 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
-## ✅ RESOLVED (pending Dave's live confirmation) — New answer renders below the visible viewport (Sept 2026)
+## 🔲 OPEN (fix shipped, awaiting Dave's re-test) — New answer renders below the visible viewport (Sept 2026)
 
 **What happened:** Real, reported case from Dave during pre-demo QA testing —
 on a conversation with some history, asking a new question and hitting enter
@@ -32,9 +32,26 @@ sidebar CSS bug below should have been the first time. Local testing was
 attempted but blocked by an unrelated local credential mismatch (likely a
 typo in Dave's own `~/.fathom_env`, not a real Supabase issue). Dave's
 explicit call: push and verify directly against the live deployed app
-instead of blocking on local testing. **Needs Dave's real confirmation, on
-both desktop and mobile** (per the exact lesson from the CSS bug below),
-before this entry is considered fully resolved rather than provisionally so.
+instead of blocking on local testing.
+
+**Real follow-up bug, caught by Dave on first live use:** the fixed 0/300/
+800ms retry schedule wasn't enough when an earlier message's "View Sources"
+expander was left open — its page images add real, variable-timing height
+to the page independent of the new answer's own content, so the last fixed
+retry could fire before that height finished settling, landing the scroll
+short of the true bottom. **Fixed:** replaced the fixed retries with a
+`MutationObserver` that re-scrolls on any DOM change for a 2.5s window after
+a new answer renders, then disconnects — self-adjusting to real, variable
+page-settling time instead of guessing at fixed delays. Deliberately
+disconnects after 2.5s rather than staying open-ended: an unbounded observer
+would keep fighting the user if they manually scrolled up to read something
+shortly after asking a question.
+
+**Original fix confirmed working live by Dave on desktop** for the basic
+case (no open expander). This follow-up fix, for the open-expander case
+specifically, has **not yet been re-tested live** — needs Dave's
+confirmation, on both desktop and mobile (per the exact lesson from the CSS
+bug below), before this entry is considered fully resolved.
 
 ---
 
