@@ -3,7 +3,7 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
-## 🔲 OPEN (fix shipped, awaiting Dave's re-test) — New answer renders below the visible viewport (Sept 2026)
+## 🔲 OPEN, deliberately deferred (Dave's call) — New answer renders below the visible viewport (Sept 2026)
 
 **What happened:** Real, reported case from Dave during pre-demo QA testing —
 on a conversation with some history, asking a new question and hitting enter
@@ -48,10 +48,28 @@ would keep fighting the user if they manually scrolled up to read something
 shortly after asking a question.
 
 **Original fix confirmed working live by Dave on desktop** for the basic
-case (no open expander). This follow-up fix, for the open-expander case
-specifically, has **not yet been re-tested live** — needs Dave's
-confirmation, on both desktop and mobile (per the exact lesson from the CSS
-bug below), before this entry is considered fully resolved.
+case (no open expander). **The MutationObserver follow-up fix did NOT
+resolve the real reported case** (rebooted, re-tested live): scrolling up
+in any previous answer or Sources listing, then submitting a new question,
+still leaves the viewport wherever it was — no movement at all, not just
+insufficient movement. This is a stronger signal than "needs more retries":
+it suggests the script may be targeting the wrong scrollable element
+entirely (Streamlit likely scrolls an inner container div, not the actual
+`<body>`/`<html>`, which is what both attempts so far have targeted) —
+guessed at reasonably given the actual DOM structure was never directly
+inspected, and two real misses in a row was the honest signal to stop
+guessing rather than try a third blind selector.
+
+**Deliberately deferred (Sept 2026, Dave's explicit call):** a real
+browser-console diagnostic (reading which element is actually scrollable)
+was proposed to replace guessing with real evidence, but Dave chose to live
+with the current behavior for now rather than spend more time on it before
+the demo. Not a correctness or trust issue — a real annoyance, not a wrong
+answer — so lower priority than anything touching answer accuracy.
+**Trigger to revisit:** whenever there's time to spare, or if it becomes a
+recurring friction point during the actual demo/trial. When picked back up,
+start with the browser-console diagnostic rather than another guessed
+selector.
 
 ---
 
