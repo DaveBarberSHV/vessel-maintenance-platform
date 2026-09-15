@@ -3,6 +3,41 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## 🔲 Sidebar history: one row per question, not per conversation (Sept 2026)
+
+**What:** The sidebar's "past conversations" list currently shows one row
+per `conversation_id`, labeled with only that conversation's *first*
+question — clicking it loads the whole conversation. Dave's real,
+practical feedback: this makes a specific past question hard to find once
+a conversation runs long, and now matters more than it used to, precisely
+because of the new conversational follow-up feature (see the resolved
+entry above) — a single conversation can now wander through several real
+topics (oil grade → how often → what about starboard...) while the
+sidebar still only ever shows its first question as the label for the
+whole thing.
+
+**Direction agreed with Dave:** flatten the sidebar to one row per
+question (not per conversation), grouped by day (Today/Yesterday/This
+Week/etc., reusing the existing recency grouping), most recent first.
+Clicking a question jumps into that conversation at that point, rather
+than only ever being reachable via whatever the first question happened
+to be.
+
+**Not yet built — no data model change needed, just a different query:**
+`messages` already has one row per question with `conversation_id` and
+`created_at` — `db.list_conversations()`'s `DISTINCT ON (conversation_id)`
+query would become a plain per-row query (no `DISTINCT ON`), still grouped
+via the existing `group_conversations_by_recency()`. The real design
+question still open: what "click a question, jump into that conversation"
+means precisely in the UI — load the full conversation from the top (as
+today), or load it scrolled/highlighted to that specific exchange. Worth
+deciding deliberately when this gets picked up, not assumed.
+
+**Why deferred:** Dave's explicit call — other priorities ahead of the
+demo take precedence over this UX improvement right now.
+
+---
+
 ## ✅ RESOLVED — Conversational follow-up questions (Sept 2026)
 
 **What:** Real request from Dave, ahead of the demo — engineers naturally ask
