@@ -196,6 +196,18 @@ wording verbatim, and never mention the term "NOTE_ID" or a note's \
 numeric ID anywhere in your ANSWER section — that ID is an internal \
 reference only used in the FIELD_NOTE_IDS section below; it means \
 nothing to the reader and must never appear in visible text.
+- If a "Recent conversation history" section is provided, use it to \
+interpret a short follow-up question that only makes sense in light of \
+what was just discussed — e.g. "what about the starboard engine?" \
+(same topic, different equipment instance), "how often?" (same topic, \
+asking for an interval this time), "does that apply to ours too?" \
+(referring back to something just named). Resolve what's actually being \
+asked and answer the full underlying question directly — never answer \
+the literal fragment on its own as if it had no context, and never ask \
+the user to repeat information already established earlier in the \
+conversation. If the history doesn't actually clarify the current \
+question (a genuinely new, unrelated topic), treat it as a fresh \
+question instead of forcing a connection that isn't there.
 
 Response format — structure your ENTIRE response using exactly these \
 four sections, in this exact order, with these exact headers, even when \
@@ -238,18 +250,22 @@ Clarifying questions — ask at most ONE per issue, never loop:
 - If, after considering the vessel equipment list above, the excerpts still \
 describe genuinely different things that the question could reasonably mean \
 (e.g. a generic term like "the pump" matches excerpts for two unrelated \
-pumps), and you have NOT already asked about this in the "Previous exchange" \
-below, ask ONE clarifying question — naming the specific real options found \
-in the excerpts, not a generic "could you clarify?"
-- If a "Previous exchange" section below shows you already asked a \
-clarifying question last turn, do NOT ask again under any circumstances — \
-this holds even if the newly retrieved excerpts for this follow-up are \
-noisy, unhelpful, or don't obviously address the reply (retrieval isn't \
-perfect, especially for a short reply). In that case, fall back to what \
-you already know from the previous exchange itself plus whatever's \
-genuinely useful in the new excerpts, clearly state what you're assuming \
-or what's still missing, and answer with that — never respond as if the \
-conversation is starting over.
+pumps), and the MOST RECENT turn in "Recent conversation history" below (if \
+any turns are present at all) does NOT show you already asked about this, \
+ask ONE clarifying question — naming the specific real options found in the \
+excerpts, not a generic "could you clarify?"
+- If the MOST RECENT turn in "Recent conversation history" below shows you \
+already asked a clarifying question last turn, do NOT ask again under any \
+circumstances — this holds even if the newly retrieved excerpts for this \
+follow-up are noisy, unhelpful, or don't obviously address the reply \
+(retrieval isn't perfect, especially for a short reply). In that case, fall \
+back to what you already know from recent conversation plus whatever's \
+genuinely useful in the new excerpts, clearly state what you're assuming or \
+what's still missing, and answer with that — never respond as if the \
+conversation is starting over. Only the single most recent turn counts for \
+this specific check — an earlier turn further back asking about a \
+different, already-resolved issue does not block a new clarifying question \
+now.
 """
 
 
@@ -533,7 +549,7 @@ def add_isolation_dwg_matches(question: str, chunks: list[dict]) -> list[dict]:
 
 
 def build_prompt(question: str, chunks: list[dict], equipment_context: str = "",
-                  previous_exchange: dict | None = None, notes_context: str = "",
+                  conversation_history: list[dict] | None = None, notes_context: str = "",
                   inventory_context: str = "") -> str:
     excerpt_blocks = []
     for i, c in enumerate(chunks):
@@ -544,13 +560,33 @@ def build_prompt(question: str, chunks: list[dict], equipment_context: str = "",
     notes_block = f"\n{notes_context}\n" if notes_context else ""
     inventory_block = f"\n{inventory_context}\n" if inventory_context else ""
 
+    # Real feature, generalized from a single-turn mechanism (Sept 2026,
+    # see BACKLOG.md): originally just one prior {question, answer} dict,
+    # scoped narrowly to the clarifying-question "did I already ask" check.
+    # Broadened to the last few turns so genuinely ambiguous follow-ups
+    # ("what about the starboard engine?", "how often?") can be resolved
+    # in context too — an engineer shouldn't have to restate the whole
+    # topic just to ask a natural follow-up. Deliberately still capped
+    # (last 3 turns, not the whole conversation) — plenty for both jobs
+    # this serves, without unboundedly growing the prompt on a long chat.
+    # Oldest first, so "the most recent turn" (used by the
+    # clarifying-question check in SYSTEM_PROMPT) is unambiguously the
+    # last one shown, not the first.
     history_block = ""
-    if previous_exchange:
+    if conversation_history:
+        recent_turns = conversation_history[-3:]
+        turn_blocks = [
+            f'Turn {i} of {len(recent_turns)}:\nUser asked: "{turn["question"]}"\n'
+            f'You answered: "{turn["answer"]}"'
+            for i, turn in enumerate(recent_turns, 1)
+        ]
         history_block = f"""
-Previous exchange in this conversation (check: did you already ask a \
-clarifying question here? If so, do not ask another — see system prompt rules):
-User asked: "{previous_exchange['question']}"
-You answered: "{previous_exchange['answer']}"
+Recent conversation history, oldest first (use this to interpret a \
+follow-up question that only makes sense in context — see system prompt \
+rules; the LAST turn below is specifically what the "did you already ask \
+a clarifying question" check refers to):
+
+{(chr(10) * 2).join(turn_blocks)}
 """
 
     return f"""Question: {question}
@@ -618,8 +654,26 @@ def find_matching_document_title(question: str) -> str | None:
     return None
 
 
+def build_search_text(question: str, conversation_history: list[dict] | None) -> str:
+    """Combines the current question with recent conversation for
+    retrieval purposes only — shared by get_answer() and answer()'s
+    --dry-run path so the two can't silently drift apart.
+
+    Only the last 2 turns' QUESTIONS are used, deliberately not their
+    answers — see get_answer()'s docstring for the full reasoning (a
+    prior answer's prose is often long and would dilute the embedding
+    query away from what's actually being asked now, the same real
+    dilution problem documented elsewhere in this file)."""
+    if not conversation_history:
+        return question
+    prior_questions = [h["question"] for h in conversation_history[-2:] if h.get("question")]
+    if not prior_questions:
+        return question
+    return " ".join(prior_questions + [question])
+
+
 def get_answer(question: str, engine: str = "voyage", top_k: int = 10,
-               api_key: str | None = None, previous_exchange: dict | None = None) -> dict:
+               api_key: str | None = None, conversation_history: list[dict] | None = None) -> dict:
     """The importable core of this module — used by both the CLI below and
     the Streamlit front end. Returns a dict rather than printing, and
     raises a normal exception rather than sys.exit()-ing, since this now
@@ -639,14 +693,31 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 10,
     would). Degrades silently to no equipment context if the registry is
     empty or unreachable — this must never be the reason a question fails.
 
-    previous_exchange (Aug 2026, see BACKLOG.md's clarifying-question
-    entry): optional {"question": ..., "answer": ...} dict for the
-    immediately-prior turn only — not the whole conversation history,
-    deliberately, to keep this scoped to its one job (letting Claude tell
-    whether it already asked a clarifying question) rather than turning
-    into a general multi-turn memory feature. The caller (app.py) decides
-    whether to pass this; the CLI below does not by default, so plain CLI
-    testing remains single-shot/stateless unless a caller passes one in.
+    conversation_history (Aug 2026, see BACKLOG.md's clarifying-question
+    entry; generalized Sept 2026 to a real multi-turn follow-up feature):
+    optional list of {"question": ..., "answer": ...} dicts, oldest first.
+    Originally a single immediately-prior-turn dict scoped only to the
+    clarifying-question "did I already ask" check; broadened to carry the
+    last few turns so genuinely ambiguous follow-ups ("what about the
+    starboard engine?", "how often?") can be resolved without the engineer
+    repeating the whole topic. Used two ways, deliberately different in
+    scope:
+      - Search/retrieval (below): only the last 2 turns' QUESTIONS (not
+        their answers) are combined with the current question. Answers are
+        left out of the search text on purpose — a full prior answer is
+        often a long procedure or spec table, and folding that much prose
+        into the embedding query risks diluting it away from what the
+        current question is actually asking, the same real dilution
+        problem documented elsewhere in this file and in BACKLOG.md. The
+        prior questions' own wording (e.g. "the port engine," "the fuel
+        filter") is what actually carries the missing referent.
+      - Prompt context (build_prompt): the last 3 full turns (question +
+        answer) are shown to Claude, since interpreting a follow-up like
+        "how often?" genuinely needs to know what the previous ANSWER
+        said, not just what was asked.
+    The caller (app.py) decides whether to pass this; the CLI below does
+    not by default, so plain CLI testing remains single-shot/stateless
+    unless a caller passes one in.
 
     Returns:
         {
@@ -677,17 +748,15 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 10,
     Raises:
         ValueError if no Anthropic API key is available.
     """
-    # Search query includes the previous question too, when there is one
-    # (Aug 2026) — a reply to a clarifying question is often short ("the
-    # azimuth one", "port side"), and a couple of words alone often isn't
-    # enough signal for good retrieval. Combining with the original
-    # question gives the embedding real context to work with, without
-    # changing what's shown to Claude as "the question" in the prompt
-    # itself (build_prompt still receives the bare current question).
-    search_text = question
-    if previous_exchange and previous_exchange.get("question"):
-        search_text = f"{previous_exchange['question']} {question}"
-    search_query = expand_units(search_text)
+    # Search query includes recent prior questions too, when there are any
+    # (Aug 2026, broadened Sept 2026 from 1 turn to 2 — see
+    # build_search_text()'s docstring) — a short follow-up ("the azimuth
+    # one," "how often?") often isn't enough signal alone for good
+    # retrieval. Combining with recent questions gives the embedding real
+    # context to work with, without changing what's shown to Claude as
+    # "the question" in the prompt itself (build_prompt still receives the
+    # bare current question).
+    search_query = expand_units(build_search_text(question, conversation_history))
 
     # Retrieval boost (Sept 2026) — if the question contains showing-language
     # AND matches a known document title exactly, fetch that document's chunks
@@ -732,7 +801,7 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 10,
     except Exception:
         pass  # same reasoning as equipment_context — never a reason a question fails
 
-    prompt = build_prompt(question, chunks, equipment_context, previous_exchange,
+    prompt = build_prompt(question, chunks, equipment_context, conversation_history,
                            notes_context, inventory_context)
 
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -837,17 +906,16 @@ def format_sources(chunks: list[dict]) -> str:
 
 
 def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: int = 5,
-           previous_exchange: dict | None = None):
+           conversation_history: list[dict] | None = None):
     """CLI-facing wrapper — keeps the exact command-line behavior/UX
     unchanged (dry-run printing, sys.exit on a missing key) while
-    delegating the real work to get_answer(). previous_exchange support
-    added Aug 2026 specifically for debugging the clarifying-question
-    feature from the CLI, reproducing exactly what app.py would send."""
+    delegating the real work to get_answer(). conversation_history support
+    added Aug 2026 (as a single-turn previous_exchange, generalized Sept
+    2026 to multiple turns) specifically for debugging the clarifying-
+    question and follow-up-question features from the CLI, reproducing
+    exactly what app.py would send."""
     if dry_run:
-        search_text = question
-        if previous_exchange and previous_exchange.get("question"):
-            search_text = f"{previous_exchange['question']} {question}"
-        search_query = expand_units(search_text)
+        search_query = expand_units(build_search_text(question, conversation_history))
         chunks = query_chunks(search_query, engine=engine, top_k=top_k)
         chunks = add_exact_code_matches(question, chunks)
         chunks = add_isolation_dwg_matches(question, chunks)
@@ -879,7 +947,7 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
             inv_conn.close()
         except Exception:
             pass
-        prompt = build_prompt(question, chunks, equipment_context, previous_exchange,
+        prompt = build_prompt(question, chunks, equipment_context, conversation_history,
                                notes_context, inventory_context)
         print("=== SYSTEM PROMPT ===")
         print(SYSTEM_PROMPT)
@@ -894,7 +962,7 @@ def answer(question: str, engine: str = "voyage", dry_run: bool = False, top_k: 
         return
 
     try:
-        result = get_answer(question, engine=engine, top_k=top_k, previous_exchange=previous_exchange)
+        result = get_answer(question, engine=engine, top_k=top_k, conversation_history=conversation_history)
     except ValueError as e:
         sys.exit(str(e))
 
@@ -941,7 +1009,12 @@ if __name__ == "__main__":
         idx = args.index("--engine")
         engine = args[idx + 1]
         del args[idx:idx + 2]
-    previous_exchange = None
+    # CLI still only simulates a single prior turn — plenty for debugging
+    # both the clarifying-question check and follow-up interpretation,
+    # without needing a multi-flag interface just for manual testing.
+    # Wrapped in a 1-item list since answer()/get_answer() now take the
+    # generalized multi-turn conversation_history.
+    conversation_history = None
     if "--previous-question" in args:
         idx = args.index("--previous-question")
         prev_q = args[idx + 1]
@@ -951,8 +1024,8 @@ if __name__ == "__main__":
             idx = args.index("--previous-answer")
             prev_a = args[idx + 1]
             del args[idx:idx + 2]
-        previous_exchange = {"question": prev_q, "answer": prev_a}
+        conversation_history = [{"question": prev_q, "answer": prev_a}]
     if not args:
         sys.exit('Usage: python answer_query.py [--engine voyage|tfidf] [--dry-run] '
                   '[--previous-question "..." --previous-answer "..."] "your question"')
-    answer(args[0], engine=engine, dry_run=dry_run, previous_exchange=previous_exchange)
+    answer(args[0], engine=engine, dry_run=dry_run, conversation_history=conversation_history)

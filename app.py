@@ -391,6 +391,36 @@ def render_assistant_message(message: dict, key_prefix: str):
             st.code(message["content"] + "\n\n" + format_sources(chunks), language=None)
 
 
+def build_conversation_history(messages: list[dict], max_turns: int = 3) -> list[dict]:
+    """Pairs up consecutive (user, assistant) messages from session state
+    into the {"question", "answer"} exchanges get_answer() expects for
+    conversation_history, most recent max_turns only.
+
+    Real feature (Sept 2026, see BACKLOG.md): so a follow-up like "what
+    about the starboard engine?" or "how often?" works without the
+    engineer having to repeat the whole question. Excludes the
+    just-appended current question itself (the caller always slices that
+    off, or passes messages up to but not including it) — that's passed
+    separately as the actual question being answered, not as history.
+
+    Deliberately tolerant of a message that never got an answer (e.g. a
+    past API failure) — skips forward rather than misaligning every
+    subsequent pair, since a wrong pairing here would feed Claude a
+    genuinely incorrect account of what was actually said."""
+    history = []
+    i = 0
+    while i < len(messages) - 1:
+        if messages[i]["role"] == "user" and messages[i + 1]["role"] == "assistant":
+            history.append({
+                "question": messages[i]["content"],
+                "answer": messages[i + 1]["content"],
+            })
+            i += 2
+        else:
+            i += 1
+    return history[-max_turns:]
+
+
 # Initialize session state before the sidebar runs — the Document Library
 # panel (inside the sidebar) can fire a question into the chat, which
 # requires messages and conversation_id to already exist.
@@ -638,6 +668,11 @@ for i, message in enumerate(st.session_state.messages):
 question = st.chat_input("Ask me an engineering question about Polaris's systems...")
 
 if question:
+    # Built from history BEFORE appending the current question below, so
+    # it naturally excludes it — conversation_history is "what came
+    # before," the current question is passed separately.
+    conversation_history = build_conversation_history(st.session_state.messages)
+
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.markdown(question)
@@ -652,7 +687,7 @@ if question:
     with st.chat_message("assistant"):
         with st.spinner("Searching the TMs..."):
             try:
-                result = get_answer(question)
+                result = get_answer(question, conversation_history=conversation_history)
                 answer_text = result["answer"]
                 chunks = result["chunks"]
                 safety_info = result.get("safety_info", "")

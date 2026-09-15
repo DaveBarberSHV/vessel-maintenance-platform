@@ -3,6 +3,50 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ RESOLVED — Conversational follow-up questions (Sept 2026)
+
+**What:** Real request from Dave, ahead of the demo — engineers naturally ask
+follow-ups like "what about the starboard engine?" or "how often?" without
+restating the whole original question, and the system needed to handle that
+without the engineer having to repeat themselves.
+
+**Real discovery made while building this:** the existing single-turn
+`previous_exchange` mechanism (Aug 2026, built for the clarifying-question
+"did I already ask" check) was never actually wired into `app.py` at all —
+`get_answer(question)` was called with no history in the real deployed app.
+So this wasn't purely additive; it also activated a dormant mechanism for
+the first time in production.
+
+**Built:**
+- Generalized `previous_exchange: dict` into `conversation_history: list[dict]`
+  throughout `answer_query.py` (CLI flags unchanged for compatibility).
+- `build_search_text()` — combines the last 2 prior **questions** (not
+  answers, deliberately, to avoid diluting the embedding query with long
+  prior-answer prose — the same real dilution problem documented elsewhere
+  in this file) with the current question for retrieval.
+- `build_prompt()` now shows Claude the last 3 full turns (question +
+  answer) as "Recent conversation history."
+- New `SYSTEM_PROMPT` rule teaching Claude to resolve a short follow-up
+  using that history, with an explicit instruction to treat a genuinely new,
+  unrelated question as fresh rather than forcing a false connection.
+- Clarifying-question rules updated to reference the new multi-turn section,
+  scoped explicitly to "the most recent turn only" so an older turn further
+  back can't wrongly satisfy or block the once-per-issue check.
+- `app.py`'s new `build_conversation_history()` pairs up session-state
+  messages into the last 3 exchanges, tolerant of a past turn with no
+  answer (e.g. an earlier API failure) — skips the orphaned question rather
+  than misaligning every later pair.
+
+**Verified live, real API calls, a real 3-turn sequence:** Turn 1 asked a
+real specific question; Turn 2 ("How often should it be checked?") was
+correctly recognized as ambiguous *in context* and triggered one legitimate
+clarifying question rather than a guess; Turn 3 (a vague reply) correctly
+did NOT trigger a second clarifying question, falling back to a stated
+interpretation and answering directly — confirming the "ask once, never
+loop" rule survived the generalization from 1 turn to multiple.
+
+---
+
 ## 🔲 OPEN, deliberately deferred (Dave's call) — New answer renders below the visible viewport (Sept 2026)
 
 **What happened:** Real, reported case from Dave during pre-demo QA testing —
