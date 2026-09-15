@@ -12,3 +12,8 @@ manifest.json
 # apply_renames.py. Not rename_log.csv, which IS the permanent record of
 # what was actually renamed and belongs in git.
 rename_proposals.csv
+
+# Scratch output from build_equipment_manifest.py — same pattern as
+# rename_proposals.csv above: regenerated fresh on every run, reviewed by
+# hand, not a permanent record worth tracking in git.
+equipment_manifest_gap_report.md

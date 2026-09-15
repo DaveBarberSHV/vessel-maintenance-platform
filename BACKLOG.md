@@ -3,6 +3,61 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ BUILT — Equipment manifest gap report (Sept 2026)
+
+**What:** Real request from Dave, ahead of the demo — a way to know what
+equipment manuals are still missing from the library, rather than
+discovering a gap only when a real question happens to hit it. New
+`ingestion/build_equipment_manifest.py`: reads every already-ingested
+machinery/general arrangement drawing directly from `tm_chunks` (no
+original PDFs needed), asks Claude to extract every equipment item
+(manufacturer, model, item designation, system/location), cross-references
+against both the `vessel_equipment` registry and the document library, and
+reports equipment with no ingested manual.
+
+**Scoping decision, confirmed against the real library before building:**
+deliberately NOT `document_type == 'General Arrangement Drawing'` alone —
+that doctype is a broad catch-all covering hull structural drawings,
+stability calcs, and tonnage estimates too, none of which show installed
+equipment. Scoped instead to the `GeneralArrangement` system's A01-A17
+series plus any `MachineryArrangement`/`EquipmentArrgt`-named drawing
+regardless of system — confirmed to match exactly 13 real, genuinely
+equipment-adjacent document-revisions.
+
+**Real, measured first run:** 192 raw equipment mentions across 13
+document-revisions → 161 after dedup → **50 real gaps** (a stated
+manufacturer + model with no matching ingested document — e.g. A.O. Smith
+water heaters, Aquafine UV sterilizers, several Ingersoll-Rand/Viking/
+Goulds pumps, LeBlanc HVAC fans, Harco exhaust silencers, the DEF/urea
+injection skid), **5 confirmed covered** (correctly matched CAT 3512E,
+Berg MTA 524, Hankison, Quincy D310HP, Amtrol WX302), and 106 items with no
+manufacturer/model stated on the drawing itself (mostly safety equipment,
+navigation lights, and internal pipe/system reference tags) — correctly
+kept separate as "not checkable" rather than false-flagged as gaps.
+**Real, useful distinction surfaced by the cross-reference:** some gaps
+(Aurora 341A, John Deere 6068AFM85) are already in the `vessel_equipment`
+registry but still have no manual ingested — registry presence and manual
+coverage are genuinely different things, and this is the first tool that
+checks both.
+
+**Known, disclosed limitation, not fixed — real OCR/vision-transcription
+noise causes some duplicates to survive dedup:** the same physical
+equipment transcribed from two different drawing revisions can come out
+with a different model string per revision (e.g. `INGERSOLL RAND 6661A3
+311 C` vs `INGERSOLL-RAND/ARO 6661U3-3°1-C` vs `666101 311 C` — all likely
+the same real oily-water pump), which the normalize-and-substring dedup
+doesn't reliably catch since the strings differ too much after
+normalization. Deliberately not "fixed" with more aggressive fuzzy
+matching — that risks silently merging two genuinely different pieces of
+equipment, a worse failure than an occasional visible near-duplicate in
+the gap list. Worth a manual glance at the report before acting on it for
+now; a real future improvement (not built) would be cross-referencing by
+piece number within a single document before merging across documents.
+
+**Output:** `equipment_manifest_gap_report.md`, regenerated fresh each run
+(gitignored, same pattern as `rename_proposals.csv` — a reviewable scratch
+artifact, not a permanent record).
+
 ## 🔲 Sidebar history: one row per question, not per conversation (Sept 2026)
 
 **What:** The sidebar's "past conversations" list currently shows one row
