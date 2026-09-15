@@ -40,9 +40,10 @@ collapses naturally in the dedup step below.
 Usage:
     export ANTHROPIC_API_KEY="..."
     export SUPABASE_DB_URL="..."
-    python build_equipment_manifest.py [--out gap_report.md]
+    python build_equipment_manifest.py [--out gap_report.csv]
 """
 
+import csv
 import json
 import re
 import sys
@@ -247,6 +248,73 @@ def build_gap_report(items: list[dict], registry: list[dict], inventory: list[di
     return {"covered": covered, "gaps": gaps, "unknown": unknown}
 
 
+CSV_COLUMNS = [
+    "status", "manufacturer", "model", "item_designation", "system_location",
+    "source_document", "source_revision", "in_registry", "matched_document",
+    "also_seen_on",
+]
+
+
+def write_csv_report(report: dict, path: str) -> None:
+    """Real, requested format (Sept 2026, Dave's call) — a flat CSV is
+    easier to filter/sort in Excel or Numbers than scrolling a long
+    Markdown file, and matches docs/vessel_onboarding_guide.md's own
+    documented workflow (`docs/equipment_manifest_[vesselname].csv`).
+    One row per equipment item across all three categories (gap/covered/
+    unknown), distinguished by the status column, so Dave can filter to
+    just status=gap without needing three separate files."""
+    rows = []
+    for g in report["gaps"]:
+        rows.append({
+            "status": "gap",
+            "manufacturer": g.get("manufacturer") or "",
+            "model": g.get("model") or "",
+            "item_designation": g.get("item_designation") or "",
+            "system_location": g.get("system_location") or "",
+            "source_document": g.get("source_document") or "",
+            "source_revision": g.get("source_revision") or "",
+            "in_registry": g.get("in_registry", False),
+            "matched_document": "",
+            "also_seen_on": "; ".join(g.get("also_seen_on") or []),
+        })
+    for c in report["covered"]:
+        rows.append({
+            "status": "covered",
+            "manufacturer": c.get("manufacturer") or "",
+            "model": c.get("model") or "",
+            "item_designation": c.get("item_designation") or "",
+            "system_location": c.get("system_location") or "",
+            "source_document": c.get("source_document") or "",
+            "source_revision": c.get("source_revision") or "",
+            "in_registry": "",
+            "matched_document": c.get("matched_document") or "",
+            "also_seen_on": "; ".join(c.get("also_seen_on") or []),
+        })
+    for u in report["unknown"]:
+        rows.append({
+            "status": "unknown",
+            "manufacturer": "",
+            "model": "",
+            "item_designation": u.get("item_designation") or "",
+            "system_location": u.get("system_location") or "",
+            "source_document": u.get("source_document") or "",
+            "source_revision": u.get("source_revision") or "",
+            "in_registry": "",
+            "matched_document": "",
+            "also_seen_on": "; ".join(u.get("also_seen_on") or []),
+        })
+
+    # Sort so the highest-priority rows (real gaps) land at the top —
+    # status first (gap, covered, unknown alphabetically happens to match
+    # that priority order already), then manufacturer/model within each.
+    rows.sort(key=lambda r: (r["status"], r["manufacturer"], r["model"], r["item_designation"]))
+
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def format_report(report: dict) -> str:
     lines = ["# Equipment Manifest — Gap Report", ""]
 
@@ -288,7 +356,7 @@ def format_report(report: dict) -> str:
 
 def main():
     args = sys.argv[1:]
-    out_path = "equipment_manifest_gap_report.md"
+    out_path = "equipment_manifest_gap_report.csv"
     if "--out" in args:
         idx = args.index("--out")
         out_path = args[idx + 1]
@@ -320,12 +388,10 @@ def main():
     conn.close()
 
     report = build_gap_report(deduped, registry, inventory)
-    text = format_report(report)
     print(f"\n{'=' * 70}\n")
-    print(text)
+    print(format_report(report))
 
-    with open(out_path, "w") as f:
-        f.write(text)
+    write_csv_report(report, out_path)
     print(f"\nFull report written to {out_path}")
 
 

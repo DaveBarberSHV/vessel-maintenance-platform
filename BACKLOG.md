@@ -54,9 +54,16 @@ the gap list. Worth a manual glance at the report before acting on it for
 now; a real future improvement (not built) would be cross-referencing by
 piece number within a single document before merging across documents.
 
-**Output:** `equipment_manifest_gap_report.md`, regenerated fresh each run
-(gitignored, same pattern as `rename_proposals.csv` — a reviewable scratch
-artifact, not a permanent record).
+**Output format changed to CSV (Sept 2026, Dave's call — easier to filter/
+sort than scrolling Markdown):** `equipment_manifest_gap_report.csv`,
+regenerated fresh each run (gitignored, same pattern as
+`rename_proposals.csv` — a reviewable scratch artifact, not a permanent
+record). One row per equipment item across all three categories (gap/
+covered/unknown), distinguished by a `status` column. A reviewed copy
+meant to be kept as a permanent per-vessel record belongs in `docs/`
+instead, per `docs/vessel_onboarding_guide.md`'s own documented naming
+convention (`docs/equipment_manifest_[vesselname].csv`) — a deliberate,
+separate step, not this default scratch output.
 
 ## 🔲 Sidebar history: one row per question, not per conversation (Sept 2026)
 
