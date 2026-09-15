@@ -1328,38 +1328,65 @@ its reasoning survive intact until it's time to build it.
 
 ---
 
-## 🔺 Real security audit log — committed, 30-day target (Sept 2026)
+## 🔲 Unified activity and security audit log (Sept 2026 — committed)
 
-**What:** A dedicated app-level security event log — distinct from the
-existing chat history, which logs conversation activity for a different
-purpose. Real events to capture, at minimum: successful and failed
-login attempts, account creation/removal, and Engineer Note submissions
-(who, what, when, outcome).
+**What:** A single `activity_log` table covering both security events
+and operational support events. The messages table already captures
+Q&A interactions, but there's no record of errors, logins, document
+library clicks, or session activity — making remote troubleshooting
+difficult when an engineer has a problem.
 
-**Why:** Surfaced directly during the NIST SP 800-171 Rev 3 review (see
+**Each row records:** timestamp, username, event_type, event_detail,
+success (boolean), ip_address (optional).
+
+**Event types to capture:**
+- login_success / login_failure
+- logout
+- question_asked (with conversation_id reference)
+- retrieval_error (API timeout, connection drop, etc.)
+- document_library_click (which document, per the note added when
+  the library panel was built)
+- engineer_note_added / engineer_note_deleted
+- answer_feedback (thumbs up/down, with message_id reference)
+
+**Why one table covers both needs:** Security auditing cares about
+logins, access patterns, and Note modifications. Support
+troubleshooting cares about errors, what the user was doing when
+something failed, and session patterns. A single queryable table
+with event_type filtering serves both without duplication.
+
+**RLS required:** Per the security-by-design standing rule, RLS must
+be enabled on this table before it goes live. Only the service role
+should be able to write to it; no user-facing query should ever
+expose another user's activity.
+
+**Add a companion script:** `review_activity_log.py` — filters by
+username, date range, or event_type for support troubleshooting.
+
+**Why this matters for fleet scaling:** At 60 vessels with self-service
+users, Dave needs to be able to diagnose "Jared says it stopped working
+on Tuesday" without being on the vessel. The activity log is the
+remote diagnostic tool that makes 1-business-day support actually
+workable.
+
+**Origin — merged from an earlier, narrower entry (Sept 2026):** first
+surfaced directly during the NIST SP 800-171 Rev 3 review (see
 `nist_800-171_rev3_tracker.xlsx`) — the whole Audit and Accountability
 control family (8 controls) depends on this existing, and currently
-doesn't. Real, incidental activity logging exists (the `messages`
-table), but nothing deliberately tracks security-relevant events the
-way this control family expects. A quick check confirmed this isn't
-something the database provider's own tooling can substitute for —
-that would cover database-level access to Supabase itself, not events
-inside our own login system (`auth.py`), which is entirely our own code
-checking our own `users` table.
+doesn't. Confirmed at the time that Supabase's own tooling can't
+substitute for this — that covers database-level access to Supabase
+itself, not events inside our own login system (`auth.py`), which is
+entirely our own code checking our own `users` table. The document
+library browsability panel (built the same day as the original entry)
+was noted then as a new category of security-relevant action (clicking
+to view a specific document) — folded into `document_library_click`
+above rather than tracked separately.
 
-**Real, buildable scope, reusing established patterns:** a new table,
-built the same way `auth.py`'s `users` table already is — no new
-architecture needed, just applying the existing pattern to a new kind
-of event.
+**Buildable scope, reusing established patterns:** a new table, built
+the same way `auth.py`'s `users` table already is — no new architecture
+needed, just applying the existing pattern to a new kind of event.
 
-**Committed target: 30 days from Sept 2026.**
-
-**Note added Sept 2026:** the document library browsability panel
-(built same day) introduces a new category of security-relevant user
-action — clicking to view a specific document. When the audit log is
-built, document browse events (who viewed which document, when) should
-be logged alongside login attempts, account changes, and Engineer Note
-submissions.
+**30-day target from Sept 2026.**
 
 ---
 
