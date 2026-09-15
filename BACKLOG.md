@@ -3,6 +3,25 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ RESOLVED — Deployed app was publicly listed on Streamlit's Explore page (Sept 2026)
+
+**What happened:** Real, found and fixed by Dave — Streamlit Community
+Cloud's default app visibility is Public, which lists an app's name and
+screenshot on Streamlit's own public Explore page for anyone browsing it,
+independent of whether the app itself has a login gate. The live Fathom-
+Polaris deployment had never had this setting explicitly checked, so it
+had been sitting on the default the whole time.
+
+**Fixed:** Dave changed the deployed app's visibility to Private directly
+in Streamlit Cloud (share.streamlit.io → app Settings → General → App
+visibility).
+
+**Prevented for future vessels:** added a checklist item to
+`docs/vessel_onboarding_guide.md`'s Phase 0.1, right after the "app has
+been deployed" check, so this gets set correctly at deployment time for
+every future vessel rather than needing to be discovered and fixed after
+the fact each time.
+
 ## ✅ BUILT — Equipment manifest gap report (Sept 2026)
 
 **What:** Real request from Dave, ahead of the demo — a way to know what

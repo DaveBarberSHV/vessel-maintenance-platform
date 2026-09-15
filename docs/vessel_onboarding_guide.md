@@ -16,6 +16,11 @@ wrong when it was skipped on the Polaris.*
 - [ ] Confirm primary point of contact (Chief Engineer + Port Engineer)
 - [ ] Confirm shared Drive folder has been created and shared with Chief Engineer
 - [ ] Confirm Streamlit app has been deployed for this vessel
+- [ ] Set app visibility to Private in Streamlit Cloud — go to
+      share.streamlit.io → app Settings → General → App visibility →
+      Private. This prevents the app from appearing on Streamlit's
+      public Explore page. Default is Public which exposes the app
+      name and screenshot to anyone browsing Streamlit's community.
 - [ ] Confirm all env vars are set (SUPABASE_DB_URL, ANTHROPIC_API_KEY,
       VOYAGE_API_KEY, SUPABASE_SERVICE_KEY, SUPABASE_URL)
 
