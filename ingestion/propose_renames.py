@@ -437,7 +437,16 @@ def run(folder_path: str):
             "notes": notes,
         })
 
-    output_path = Path("rename_proposals.csv")
+    # Anchored to this script's own directory (Sept 2026, real bug found
+    # live) — matches scan_folder.py's MANIFEST_PATH pattern. A plain
+    # relative Path("rename_proposals.csv") landed wherever the caller's
+    # cwd happened to be, and ingest_new_docs.py's CSV_PATH constant
+    # assumed a different, fixed location — the two only agreed by
+    # coincidence of which directory the wrapper was run from. Confirmed
+    # live: a real, 12-day-stale CSV was already sitting at the location
+    # the wrapper expected, from an unrelated earlier batch — exactly the
+    # kind of silent wrong-file mixup this fixes for good.
+    output_path = Path(__file__).parent / "rename_proposals.csv"
     with open(output_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=[
             "original_filename", "proposed_filename", "system", "action", "notes"

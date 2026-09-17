@@ -3,6 +3,158 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## 🔺 PRIORITY, not yet fixed — scan_folder.py's rename-detection can silently orphan a real document (Sept 2026)
+
+**What happened:** Real, live incident during the first real test of the
+inbox workflow — Dave deliberately dropped a byte-for-byte duplicate of
+an already-ingested document (`Shafting_Gewes_CardanShafts_RefData_RevGreaseQty022021.pdf`)
+into the inbox under a different, clearly test-marked name
+(`Drivetrain_GEWES_CardanShaft_REFDATA_RevTESTDUPE.pdf`) specifically to
+test the pipeline. Running `scan_folder.py` against just the inbox did
+NOT create a second set of chunks (which would have been the expected,
+merely-wasteful outcome) — it silently **removed the real document's 5
+chunks and its `manifest.json` entry entirely**, reassigning them to the
+test filename, even though the real file was never touched and still sat
+exactly where it always had, correctly filed, on disk.
+
+**Real root cause, confirmed directly:** `scan_folder.py`'s rename
+detection (`hash_to_prior_filename`, built from `manifest.json`) matches a
+newly-scanned file's content hash against every previously-ingested file's
+hash, and — if it finds a match — assumes the new file must be a rename
+of the old one, moving the chunks/manifest entry to the new name. This is
+correct when a file was genuinely renamed (the old path no longer exists
+on disk). It's wrong when a content-identical *duplicate* appears
+somewhere else while the original is still present and correctly filed —
+there's currently no check for that distinction at all.
+
+**Real, live consequence, not hypothetical:** for the several minutes
+between running `scan_folder.py` on the inbox and catching this, the real,
+correctly-filed GEWES grease-quantity reference document was **completely
+unsearchable** — a real question about it would have gotten "not covered"
+even though the file was sitting right there, correctly named, in
+`Drivetrain TMs/Shafting and Bearings/`. This wasn't caused by the
+deliberate test duplicate being *wrong* — it was caused by the rename
+detection reacting to it exactly as it reacts to any hash match, with no
+distinction between "renamed" and "duplicated."
+
+**Fixed for this one incident, not the underlying bug:** backed up the 5
+orphaned chunks (`/tmp/test_dupe_chunks_backup.json`) before deleting
+them, removed the stale test manifest entry, re-ran `scan_folder.py`
+against the real file's actual folder to restore its 5 chunks under its
+correct name, and verified via `audit_manifest.py` that only the same
+pre-existing, already-confirmed-benign partial gaps remained — nothing
+else broke. Removed the physical test duplicate from the inbox afterward.
+
+**Real candidate fix, not built:** before treating a content-hash match as
+a rename, `scan_folder.py` should check whether the *old* filename the
+hash was previously associated with still physically exists somewhere in
+the scanned tree. If it does, this is a genuine duplicate (handle it the
+way `find_duplicate_files.py` already does — flag it, don't silently
+reassign identity), not a rename. If the old file is genuinely gone, the
+current rename-detection behavior is correct and should stay as-is.
+
+**Why this is priority, not routine:** this isn't specific to deliberate
+testing — any real, accidental duplicate (a second copy of a vendor PDF
+saved under a slightly different name, dropped anywhere in the scanned
+tree) would trigger the exact same silent data loss on the *original,
+correctly-filed* document, with no error, warning, or indication anything
+went wrong. Confirmed real and reproducible, not a one-off.
+
+---
+
+## Real, smaller finding from the same test — vision-extracted rename proposals can violate the naming convention they're supposed to produce (Sept 2026)
+
+**What happened:** `propose_renames.py`'s vision-extraction fallback (for
+filenames that can't be parsed directly) proposed
+`Drivetrain_GEWES_CardanShaft_REFDATA_Rev02-2021.pdf` for the real inbox
+test file — a hyphen in the revision field (`Rev02-2021`). `scan_folder.py`'s
+own `FILENAME_PATTERN` requires `Rev[A-Za-z0-9]+` — no hyphens allowed.
+Had this exact proposed name been approved as-is without noticing, ingestion
+would have silently failed to recognize it as a valid convention name at
+all (treated as "unmatched," needing yet another rename).
+
+**Real root cause:** the vision-extraction prompt in `propose_renames.py`
+asks Claude for a `Rev` value (e.g. `"Rev1"`) but doesn't constrain its
+format, and Claude reasonably reproduced the document's own real revision
+date format ("02-2021") rather than a convention-compliant alphanumeric-only
+string.
+
+**Not fixed here** — worked around for this specific test by using a
+different proposed name instead. Real candidate fix: constrain the vision
+extraction prompt's `Rev` field explicitly to alphanumeric-only, or
+validate/sanitize the proposed filename against `FILENAME_PATTERN` before
+writing it to the CSV, flagging (not silently allowing) anything that
+wouldn't actually be recognized by `scan_folder.py` later.
+
+## ✅ BUILT — Inbox folder workflow for document collection (Sept 2026)
+
+**What:** Real workflow change from Dave, thought through separately with
+Jared first — a real "New Documents - Inbox" folder Jared can drop files
+into, so Dave runs one command (`ingest_new_docs.py`) and the file gets
+renamed, ingested, and filed into the correct `Vessel Library/<System>/`
+subfolder automatically, with no separate manual filing step afterward.
+
+**Confirmed directly before building (Sept 2026):** neither "New Documents
+- Inbox" nor "Vessel Library" exist yet in the real Drive folder — this is
+a new structure being introduced, not a rename of the existing one, so
+`ingest_new_docs.py` creates both the vessel library folder and any needed
+system subfolder as it goes, rather than assuming they're already there.
+
+**Built:**
+- `--inbox` flag (default: `<Drive folder>/New Documents - Inbox`).
+- Step 0 lists what's actually in the inbox before anything runs.
+- Steps 1/3/4/6 (propose renames, dry run, apply renames, ingest) are now
+  scoped to the inbox specifically, not the whole Drive tree — renames
+  still happen in place within the inbox, same as before.
+- Step 5 (duplicate check) stays scoped to the *whole* Drive tree
+  deliberately — that's what catches an inbox file duplicating something
+  already filed elsewhere in the library.
+- New Step 7, `file_into_vessel_library()`: reads the reviewed CSV's
+  `system` column and the fresh post-ingest `manifest.json`, moves each
+  successfully-renamed-and-ingested file into `Vessel Library/<System>/`,
+  creating that subfolder if it doesn't exist. Deliberately conservative
+  about what counts as "successful" — a file only gets moved if its
+  proposed filename actually appears in `manifest.json` after
+  `scan_folder.py` ran (confirming real ingestion success, not just that
+  the ingest step didn't crash). SKIP rows (automatic or Dave manually
+  writing "SKIP" during review), REVIEW rows, and RENAME rows missing a
+  System value are all left in the inbox with a clear printed reason
+  rather than silently mis-filed. Never overwrites an existing file at the
+  destination.
+
+**Verified before touching anything real:** this performs real,
+hard-to-reverse moves on Dave's actual Google Drive folder (confirmed
+directly accessible and real — not a sandbox), so `file_into_vessel_library()`
+was refactored to take all paths as explicit parameters (rather than
+reading module globals) specifically so it could be unit-tested in an
+isolated `/tmp` sandbox first. Tested all six real scenarios directly: a
+clean successful move (with subfolder auto-creation), a renamed file NOT
+found in `manifest.json` (correctly flagged as a possible ingest failure,
+left in inbox), a manual SKIP, a REVIEW row, a RENAME row with no System
+value, and a destination collision (confirmed the existing file's content
+was preserved, not overwritten). All six behaved correctly before this
+went anywhere near the real pipeline.
+
+**Real, pre-existing inconsistency — flagged as low-priority, then
+confirmed live as a real, active bug during the first real inbox test
+(Sept 2026):** `CSV_PATH` pointed to the repo root, while
+`propose_renames.py` wrote wherever the caller's cwd happened to be —
+these only agreed by coincidence of which directory the wrapper was run
+from. Running `propose_renames.py` directly against the real new inbox
+file confirmed this immediately: the fresh CSV landed in `ingestion/`, but
+a **real, 12-day-stale CSV from an unrelated earlier batch** (7 old yard
+drawing/vendor renames, none related to the current inbox file) was
+already sitting at the repo-root location the wrapper expected. Had the
+full wrapper been run without checking this first, Dave would have
+reviewed and potentially approved that stale, unrelated CSV instead of a
+real proposal for the file actually in the inbox. **Fixed for real, not
+deferred further:** both `propose_renames.py`'s output path and
+`ingest_new_docs.py`'s `CSV_PATH` are now anchored to the script's own
+directory (matching `scan_folder.py`'s `MANIFEST_PATH` pattern) —
+guaranteed to agree regardless of cwd. Verified live: re-ran
+`propose_renames.py` against the real inbox after the fix; the CSV now
+lands exactly where `ingest_new_docs.py` looks for it.
+
 ## ✅ BUILT, with two real limitations disclosed — Library status spreadsheet (Sept 2026)
 
 **What:** Real request from Dave — a multi-tab Excel spreadsheet Dave can
