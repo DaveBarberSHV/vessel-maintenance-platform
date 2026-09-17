@@ -32,16 +32,19 @@ line, not one per page; a genuinely out-of-scope question (nothing
 actually cited) correctly omitted the block entirely rather than
 fabricating one.
 
-**Real, separate limitation found while testing, not fixed here:** a long,
-multi-step procedural answer (the fuel filter change) hit the existing
-`max_tokens=1000` cap on the real answer call and got cut off mid-
-procedure — confirmed directly via `stop_reason: max_tokens` — before
-ever reaching this new footer. Pre-existing, unrelated to this change in
-origin, but this feature makes it newly relevant: a long answer can now
-lose both its own ending AND the Full manuals reference. Not raised here
-since it's a separate cost/latency tradeoff Dave should decide on
-deliberately, not something to bump silently as a side effect of an
-unrelated prompt change.
+**Real, separate limitation found while testing — raised and fixed same
+day (Dave's call):** a long, multi-step procedural answer (the fuel
+filter change) hit the existing `max_tokens=1000` cap on the real answer
+call and got cut off mid-procedure — confirmed directly via
+`stop_reason: max_tokens` — before ever reaching this new footer.
+Pre-existing, unrelated to this change in origin, but this feature made it
+newly relevant: a long answer could lose both its own ending AND the Full
+manuals reference. Raised generously to 4000 (same reasoning as
+`extract_equipment_list.py`'s own max_tokens bump — size for real observed
+cases, not just the exact one found). Verified live: the same fuel filter
+question now generates the complete procedure (all four sub-sections plus
+priming) with no truncation, correctly ending with the Full manuals
+footer.
 
 ## ✅ RESOLVED — Deployed app was publicly listed on Streamlit's Explore page (Sept 2026)
 

@@ -850,9 +850,18 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 10,
     # path, so an unbounded hang here means a user's chat freezes with
     # no error at all — worse than the same bug in an offline script.
     client = anthropic.Anthropic(api_key=key, timeout=120.0)
+    # Raised from 1000 (Sept 2026, real bug found live via the "Full
+    # manuals" feature above) — a real, long multi-step procedural answer
+    # (the fuel filter change, Primary + Secondary + Duplex procedures)
+    # hit 1000 exactly, confirmed via stop_reason == "max_tokens", cutting
+    # off mid-procedure before ever reaching the FIELD_NOTE_IDS/SAFETY_INFO
+    # sections were even fully written, let alone the new footer. Raised
+    # generously, not just to the exact size that would have covered this
+    # one case, matching the same reasoning already applied to
+    # extract_equipment_list.py's max_tokens bump.
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1000,
+        max_tokens=4000,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
     )
