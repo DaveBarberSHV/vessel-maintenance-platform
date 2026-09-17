@@ -19,6 +19,11 @@ Drawings tab only lists what's actually ingested. Detecting real missing
 drawings needs comparison against the shipyard's own real drawing
 index/transmittal log, not a numbering-sequence guess.
 
+Output: saved directly to the shared Google Drive folder (see
+DRIVE_OUTPUT_DIR below), not this repo's docs/ folder — so it's
+immediately in the same place Jared already looks for vessel documents,
+no separate share step needed.
+
 Usage (from ingestion/, all env vars exported):
     python3.14 generate_library_status.py
 """
@@ -40,6 +45,19 @@ from retrieval import get_pg_connection
 # is deliberately single-vessel for now (see BACKLOG.md's fleet-scaling
 # entry); update both together if that ever changes.
 VESSEL_NAME = "polaris"
+
+# Real request from Dave (Sept 2026): saved to the shared Google Drive
+# folder, not the repo's docs/ folder, specifically so it can be shared
+# with the Polaris lead (Jared) directly — a git-tracked repo file isn't
+# something Jared has any reason to go looking for. Hardcoded absolute
+# path, matching CLAUDE.md's own existing convention for this same real
+# Drive folder. Created if it doesn't exist yet — confirmed directly
+# (Sept 2026) that "Manifest" didn't exist as a subfolder before this.
+DRIVE_OUTPUT_DIR = (
+    "/Users/davebarber/Library/CloudStorage/"
+    "GoogleDrive-dave.safeharbour@gmail.com/My Drive/"
+    "Vessel Maintenance System Documents/Manifest"
+)
 
 # document_type values confirmed directly against the real library
 # (Sept 2026) — see docs/vessel_onboarding_guide.md's Appendix A for the
@@ -290,7 +308,8 @@ def main():
     build_drawings_tab(wb, documents)
     build_reference_tab(wb, documents)
 
-    out_path = f"../docs/library_status_{VESSEL_NAME}.xlsx"
+    os.makedirs(DRIVE_OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(DRIVE_OUTPUT_DIR, f"library_status_{VESSEL_NAME}.xlsx")
     wb.save(out_path)
     print(f"\n{len(documents)} distinct documents, {total_chunks} total chunks.")
     print(f"Library status spreadsheet written to {out_path}")

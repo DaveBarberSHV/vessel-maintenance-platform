@@ -160,10 +160,15 @@ lands exactly where `ingest_new_docs.py` looks for it.
 **What:** Real request from Dave — a multi-tab Excel spreadsheet Dave can
 regenerate after every ingest run and send to Jared, showing exactly
 what's in the library and what's known to be missing. New
-`ingestion/generate_library_status.py` → `docs/library_status_polaris.xlsx`
-(gitignored — regenerated fresh each run by design, same reasoning as the
-old Chroma binary blob lesson: a frequently-changing binary doesn't belong
-in git history). Four tabs: Summary (per-system equipment coverage, Last
+`ingestion/generate_library_status.py` → originally
+`docs/library_status_polaris.xlsx` (gitignored, regenerated fresh each
+run); **moved Sept 2026 (Dave's call)** to the shared Google Drive
+"Manifest" folder instead
+(`.../Vessel Maintenance System Documents/Manifest/library_status_polaris.xlsx`,
+created automatically if it doesn't exist) — Jared already looks for
+vessel documents there, so no separate share step is needed; the repo's
+`docs/` folder was never the real destination, just where this happened
+to land first. Four tabs: Summary (per-system equipment coverage, Last
 Updated timestamp, total chunk count), Equipment & TMs, Drawings,
 Reference Docs — gap rows highlighted yellow throughout.
 
