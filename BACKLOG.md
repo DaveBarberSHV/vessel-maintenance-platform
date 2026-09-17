@@ -3,6 +3,79 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## 🔺 PRIORITY, investigated but deliberately not fixed yet — Safety Info can silently omit real WARNINGs (Sept 2026)
+
+**What happened:** Real, reported case from Dave — the Safety Information
+section for the fuel filter procedure didn't show every WARNING actually
+present in the source manual, only some of them. Explicit ask: investigate
+and record the root cause as a priority backlog item, don't fix it now.
+
+**Real root cause, confirmed directly against the actual ingested text,
+not assumed:** the source PDF's "WARNING" callout boxes frequently don't
+survive text extraction as the literal word "WARNING" at all — confirmed
+on the exact pages this question uses (173-175 of the CAT 3512E O&M
+Manual): `grep`-ing the raw ingested text for "WARNING" on those pages
+returns **zero** matches, while "NOTICE" appears correctly six times on
+the same pages. Yet the real WARNING content is genuinely present as
+prose — e.g. page 173's actual extracted text reads (verbatim, exactly as
+ingested):
+
+```
+Fuelleakedorspilledontohotsurfacesorelectri-
+4.Removebolt(1),O-ringseal(2),case(3)and calcomponentscancauseafire.Tohelpprevent
+element(4). possible injury, turn the start switch off when
+```
+
+Note the interleaving: a numbered procedure step from the page's left
+column and a WARNING box's body text from the right column are merged
+mid-sentence, word-for-word out of order — a real two-column reading-order
+extraction bug (in `parse_and_chunk.py`/`table_extraction.py`'s handling
+of pdfplumber's column layout), not a chunking or retrieval problem. The
+WARNING box's own heading is casualty of the same interleaving and doesn't
+survive as literal text at all in this case.
+
+**Why the current app sometimes gets it right anyway, and why that's not
+reassuring:** `SYSTEM_PROMPT`'s `SAFETY_INFO` extraction doesn't require
+literally spotting the word "WARNING" — Claude is clearly inferring
+severity from the surviving prose content (fire/injury/death language)
+well enough to correctly label and reproduce several real warnings even
+without the source label surviving. Confirmed library-wide this isn't a
+one-page fluke: 22 of 341 chunks in this one document retain the literal
+word "WARNING" somewhere, meaning the other ~90% of the document's pages
+either have no warnings or lost the label the same way these did. **The
+real problem this creates:** with no explicit label to anchor on, Safety
+Info completeness is now a matter of the model's own single-pass judgment
+call across a large, mixed prompt, not a reliable lookup — exactly the
+same category of unreliability this project already solved for citations
+(`format_sources()`'s docstring: built directly from retrieval metadata,
+"not from Claude's own summary of it... more reliable than dependent on
+the model reliably reformatting it every time"). Safety Info has no
+equivalent code-driven guarantee, so it can vary run to run on the exact
+same real input — plausibly explaining Dave's real observed case even
+without an exact side-by-side repro of that specific run.
+
+**Scope clarification from Dave, worth keeping for whenever this gets
+picked up:** NOTICEs are not safety-critical enough to require the same
+completeness guarantee — only WARNING/CAUTION/DANGER-severity content
+needs to be reliably, exhaustively surfaced. Simplifies the eventual fix:
+no need to also solve NOTICE completeness.
+
+**Real candidate fix directions, not built:**
+1. Fix the underlying two-column extraction/reading-order bug in
+   `parse_and_chunk.py`/`table_extraction.py` so a WARNING box's own label
+   reliably survives as literal text, the same way NOTICE already does.
+2. Once (1) is fixed (or independently, as a belt-and-suspenders layer),
+   move Safety Info extraction toward the same code-driven-from-raw-text
+   philosophy as `format_sources()` — a deterministic scan of cited
+   excerpts' actual text for WARNING/CAUTION/DANGER-labeled blocks,
+   surfaced directly rather than trusted entirely to one LLM pass's
+   completeness — so a real warning can never silently vanish depending on
+   how the model happens to weigh a long, mixed prompt on a given run.
+
+**Deliberately not fixed now — Dave's explicit call.** Flagged priority
+given this touches the product's core "safety-forward, verbatim" promise
+(`docs/product_vision.md`), not a cosmetic gap.
+
 ## ✅ RESOLVED — "Full manuals" reference at the end of an answer (Sept 2026)
 
 **What:** Real request from Dave (thought through with Claude Chat, part of

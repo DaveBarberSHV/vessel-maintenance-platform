@@ -256,7 +256,8 @@ cited document's complete source, so the reader knows where to find the \
 full manual, not just the cited page:
 
 📁 Full manuals:
-Full manual: Vessel Library / [System] / [source_file]
+The complete manual is located [System]/[source_file] on the vessel's \
+Engineering laptop computer with Fathom.
 
 One line per unique document actually cited — never one line per \
 excerpt, since several excerpts can come from the same document. \
