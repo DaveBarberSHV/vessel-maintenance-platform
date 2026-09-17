@@ -3,6 +3,59 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ BUILT, with two real limitations disclosed — Library status spreadsheet (Sept 2026)
+
+**What:** Real request from Dave — a multi-tab Excel spreadsheet Dave can
+regenerate after every ingest run and send to Jared, showing exactly
+what's in the library and what's known to be missing. New
+`ingestion/generate_library_status.py` → `docs/library_status_polaris.xlsx`
+(gitignored — regenerated fresh each run by design, same reasoning as the
+old Chroma binary blob lesson: a frequently-changing binary doesn't belong
+in git history). Four tabs: Summary (per-system equipment coverage, Last
+Updated timestamp, total chunk count), Equipment & TMs, Drawings,
+Reference Docs — gap rows highlighted yellow throughout.
+
+**Real investigation before shipping — the "known drawing numbers not yet
+ingested" part of the Drawings tab was deliberately NOT built:** tested a
+sequence-gap heuristic (inferring a missing "A04" from having A01-A03,
+A05-A06) directly against the real library before committing to it. The
+real numbering has large, apparently intentional gaps that have nothing to
+do with missing documents — e.g. Hull's "S" series spans 01-71 with only
+22 real drawings ingested (49 "implied missing" by a naive gap-fill,
+almost certainly mostly false), and Hull's "S1101"/"S1202" codes aren't
+even a dense sequence at all (deck-level references, not sequential
+drawing numbers). Shipping that would have actively misled Dave into
+chasing shipyard drawings that may never have existed. The Drawings tab
+only lists what's actually ingested; detecting real missing drawings needs
+comparison against the shipyard's own real drawing index/transmittal log,
+not a numbering-sequence guess.
+
+**Real limitation confirmed live, not fully resolved — the Equipment tab's
+"System" doesn't match the document library's own System taxonomy:** a
+first version bucketed every single equipment item under "GeneralArrangement"
+(the source *drawing's* system), since every manifest entry currently comes
+from GeneralArrangement-prefixed arrangement drawings — completely
+defeating a per-system breakdown. Fixed to use the equipment's own real
+system as the source drawing's `system_location` text describes it (e.g.
+"Main Engine," "Fresh Water System") instead. This is honest, real signal
+from the source — but it's the drawing's own free-text wording, not the
+same canonical System names (`MainEngines`, `Piping`, etc.) the document
+library itself uses, and the two haven't been reconciled — confirmed live,
+the Summary tab now shows ~37 fragmented system labels (e.g. "Coupler Air
+System," "Coupler HPU," "Coupler Room Exhaust Fan" as three separate
+one-item rows that are really all one real coupler system) rather than the
+app's clean ~15-20 system list. Documented directly in the spreadsheet's
+own Summary tab text so this isn't a silent surprise. A real future
+improvement (not built): a deliberate keyword/mapping table from
+drawing-described locations to the app's canonical System names — not
+attempted now since guessing that mapping without real evidence risks the
+same kind of misleading result the drawing-gap heuristic above was
+rejected for.
+
+**Dependency added:** `openpyxl` — added to `ingestion/requirements.txt`
+(ingestion-only, matching that file's existing separation from the
+deployed app's own `requirements.txt`).
+
 ## 🔺 PRIORITY, investigated but deliberately not fixed yet — Safety Info can silently omit real WARNINGs (Sept 2026)
 
 **What happened:** Real, reported case from Dave — the Safety Information

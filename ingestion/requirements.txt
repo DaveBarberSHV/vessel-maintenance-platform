@@ -4,3 +4,4 @@ voyageai
 anthropic
 psycopg2-binary
 requests
+openpyxl

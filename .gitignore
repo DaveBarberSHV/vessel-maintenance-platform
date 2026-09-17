@@ -21,3 +21,11 @@ rename_proposals.csv
 # docs/equipment_manifest_[vesselname].csv) — a deliberate, separate step,
 # not this default scratch output.
 equipment_manifest_gap_report.csv
+
+# Output of generate_library_status.py — regenerated after every ingest
+# run by design (that's the whole point: always current before sending to
+# Jared), so it's a distribution artifact, not a permanent record worth
+# committing. Same lesson already learned the hard way with the old
+# Chroma binary blob (see docs/architecture.md) — a frequently-changing
+# binary file doesn't belong in git history.
+docs/library_status_*.xlsx
