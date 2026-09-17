@@ -3,6 +3,46 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ RESOLVED — "Full manuals" reference at the end of an answer (Sept 2026)
+
+**What:** Real request from Dave (thought through with Claude Chat, part of
+a document-collection workflow change with Jared) — when an answer cites
+specific documents, append a brief "📁 Full manuals:" block pointing to
+each cited document's complete source (`Vessel Library / [System] /
+[source_file]`), so the reader knows where to find the whole manual, not
+just the cited page.
+
+**Built:** `SYSTEM_PROMPT` now instructs Claude to add this block itself at
+the end of `###ANSWER###`, one line per unique document actually cited
+(never per excerpt/page). `build_prompt()`'s excerpt header now also
+exposes each chunk's real `source_file` value directly — added
+specifically so Claude has the actual filename to reference rather than
+reconstructing/guessing one from `document_title`, which is a
+differently-formatted display string (e.g. "O&M Manual" vs the real file's
+"OMM" abbreviation), not a deterministic transform of the real filename.
+The existing "don't include a Sources list" rule was reworded to
+distinguish it from this new block — that rule is about page-level
+citations (handled separately, by code, via `format_sources()`); this is a
+different, document-level reference that Claude does add itself.
+
+**Verified live, three real cases:** a single-document citation produced
+the correct one-line reference with the real filename; a multi-excerpt
+answer citing several pages of the same document correctly deduped to one
+line, not one per page; a genuinely out-of-scope question (nothing
+actually cited) correctly omitted the block entirely rather than
+fabricating one.
+
+**Real, separate limitation found while testing, not fixed here:** a long,
+multi-step procedural answer (the fuel filter change) hit the existing
+`max_tokens=1000` cap on the real answer call and got cut off mid-
+procedure — confirmed directly via `stop_reason: max_tokens` — before
+ever reaching this new footer. Pre-existing, unrelated to this change in
+origin, but this feature makes it newly relevant: a long answer can now
+lose both its own ending AND the Full manuals reference. Not raised here
+since it's a separate cost/latency tradeoff Dave should decide on
+deliberately, not something to bump silently as a side effect of an
+unrelated prompt change.
+
 ## ✅ RESOLVED — Deployed app was publicly listed on Streamlit's Explore page (Sept 2026)
 
 **What happened:** Real, found and fixed by Dave — Streamlit Community

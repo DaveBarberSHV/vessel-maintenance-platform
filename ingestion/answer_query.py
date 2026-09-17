@@ -158,9 +158,12 @@ conversion, state the value exactly as given in the excerpt rather than \
 guess at converting it.
 - Be concise and procedural — the reader is a working engineer, not someone \
 who wants prose. Use numbered steps when the excerpt describes a procedure.
-- Do not include a "Sources" list in your answer — the application displays \
-sources separately, generated directly from the actual retrieved excerpts \
-rather than from your own summary of them.
+- Do not include a page-level "Sources" list in your answer — the \
+application displays that separately, generated directly from the actual \
+retrieved excerpts rather than from your own summary of them. (This is \
+distinct from the "📁 Full manuals" block described under ###ANSWER### \
+below, which you DO add yourself — that's a different, document-level \
+reference, not a page citation list.)
 - If a "Vessel equipment currently installed" list is provided, use it to \
 determine which model/variant actually applies when a manual covers multiple \
 options — the vessel only has one of them installed, so there's no need to \
@@ -245,6 +248,27 @@ Your actual answer, following all the rules above. Do not repeat the \
 field note content or the safety information here in any form — they're \
 shown separately — beyond a short reference if relevant (e.g. flagging \
 a conflict with the manual, per the Engineer Notes rule above).
+
+After the answer itself, if you actually cited one or more specific \
+documents to answer this question (not just excerpts you were given but \
+didn't rely on), add a brief block at the very end pointing to each \
+cited document's complete source, so the reader knows where to find the \
+full manual, not just the cited page:
+
+📁 Full manuals:
+Full manual: Vessel Library / [System] / [source_file]
+
+One line per unique document actually cited — never one line per \
+excerpt, since several excerpts can come from the same document. \
+[System] is the first segment of that document's title before " - " \
+(e.g. "MainEngines" from "MainEngines - CAT 3512E O&M Manual"). \
+[source_file] is that excerpt's own source_file value exactly as given \
+in the excerpt header above — never invent, reformat, abbreviate, or \
+guess a filename that wasn't provided; if an excerpt you cited has no \
+source_file value, omit that one line rather than guessing. Omit this \
+entire block if the question was answered from Engineer Notes or the \
+vessel equipment list alone, with no specific document excerpt actually \
+relied upon.
 
 Clarifying questions — ask at most ONE per issue, never loop:
 - If, after considering the vessel equipment list above, the excerpts still \
@@ -554,7 +578,14 @@ def build_prompt(question: str, chunks: list[dict], equipment_context: str = "",
     excerpt_blocks = []
     for i, c in enumerate(chunks):
         citation = f'{c["metadata"]["document_title"]}, {c["metadata"]["revision"]}, p. {c["metadata"]["page_number"]}'
-        excerpt_blocks.append(f"--- Excerpt {i+1} ({citation}) ---\n{c['text']}")
+        # source_file exposed here (Sept 2026, real request from Dave, for
+        # the "Full manuals" reference below) so Claude has the actual
+        # real filename to work with — never asked to guess or reconstruct
+        # it from document_title, which is a differently-formatted display
+        # string (e.g. "O&M Manual" vs the real file's "OMM" abbreviation),
+        # not a deterministic transform of the real filename.
+        source_file = c["metadata"].get("source_file", "unknown")
+        excerpt_blocks.append(f"--- Excerpt {i+1} ({citation}, source_file: {source_file}) ---\n{c['text']}")
     excerpts = "\n\n".join(excerpt_blocks)
     equipment_block = f"\n{equipment_context}\n" if equipment_context else ""
     notes_block = f"\n{notes_context}\n" if notes_context else ""
