@@ -744,13 +744,45 @@ def build_search_text(question: str, conversation_history: list[dict] | None) ->
     answers — see get_answer()'s docstring for the full reasoning (a
     prior answer's prose is often long and would dilute the embedding
     query away from what's actually being asked now, the same real
-    dilution problem documented elsewhere in this file)."""
+    dilution problem documented elsewhere in this file).
+
+    Current question is repeated (Sept 2026, real bug found live): a real
+    topic change ("bilge drain points" -> "PPE for the main switchboard")
+    got completely hijacked by the unrelated prior topic when both were
+    combined with equal weight — confirmed directly, bilge schematics
+    filled every one of the top 5 real retrieval results, zero
+    switchboard-safety content anywhere among them. Repeating the current
+    question doubles its weight in the combined embedding, letting it
+    dominate a genuine topic change while still preserving enough of the
+    prior question's real content for a short, referring follow-up ("How
+    often should it be checked?", sharing zero words with the prior
+    question) to still correctly retrieve the right content.
+
+    A topic-change heuristic (detect zero shared content words between
+    the two questions, drop history entirely when true) was considered
+    and rejected after testing: it correctly resets on the bilge/
+    switchboard case, but the exact "How often should it be checked?"
+    follow-up above ALSO shares zero words with its prior question despite
+    being a genuine, necessary follow-up — the heuristic can't tell "topic
+    changed" from "same topic, referred to elliptically" apart, and would
+    have broken the very case this whole feature was built for. Weighting
+    never fully discards history, so it degrades gracefully on both real
+    cases instead of picking one to break.
+
+    Real, disclosed residual limitation, not eliminated: a 3x weighting
+    was also tested and didn't meaningfully improve on 2x — some
+    tangentially-related prior-topic content can still appear low in the
+    results (e.g. one bilge schematic at rank 3-4 instead of dominating
+    ranks 1-5), just no longer displacing the genuinely relevant content
+    at the top. Worth revisiting only if a future real case shows this
+    residual bleed actually burying a real answer, not just ranking below
+    it."""
     if not conversation_history:
         return question
     prior_questions = [h["question"] for h in conversation_history[-2:] if h.get("question")]
     if not prior_questions:
         return question
-    return " ".join(prior_questions + [question])
+    return " ".join([question, question] + prior_questions)
 
 
 def get_answer(question: str, engine: str = "voyage", top_k: int = 10,

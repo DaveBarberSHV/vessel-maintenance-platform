@@ -3,6 +3,56 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ RESOLVED — Conversation context bleeding into an unrelated topic change (Sept 2026)
+
+**What happened:** Real, reported case — after asking about bilge drain
+points, a genuinely unrelated follow-up ("What PPE is required when
+working on the main switchboard?") retrieved bilge schematics instead of
+switchboard content. Confirmed directly: combining the prior bilge
+question with the new switchboard question at equal weight put bilge
+schematics in **all 5** of the top 5 real retrieval results — zero
+switchboard-safety content anywhere among them.
+
+**Two candidate fixes proposed; tested both against two real cases before
+choosing:**
+1. **Topic-change heuristic** (drop history entirely if the two questions
+   share no content words after stopword removal) — correctly resets on
+   the bilge/switchboard case, but tested against the exact validated
+   follow-up case from the original feature ("How often should it be
+   checked?" after an oil-pressure-alarm question) and **it shares zero
+   words with its prior question too**, despite being a genuine, necessary
+   follow-up. This heuristic can't distinguish "topic changed" from "same
+   topic, referred to elliptically" — would have broken the very case this
+   whole feature was built for.
+2. **Weighted duplication** (repeat the current question, append history
+   once) — tested at 2x and 3x weight. 2x already correctly surfaced
+   switchboard content at rank 1 (previously absent from the top 5
+   entirely) while the follow-up case remained fully correct; 3x showed no
+   meaningful further improvement, so 2x was kept, matching the simpler of
+   the two options originally proposed.
+
+**Fixed:** `build_search_text()` now repeats the current question before
+appending recent prior questions, so it dominates the combined embedding
+on a genuine topic change while still preserving enough of the prior
+question's real content for a short, referring follow-up to work.
+
+**Verified live, both real cases, through the full `get_answer()`
+pipeline:** the bilge → switchboard question now correctly retrieves no
+bilge content, and — genuinely better than a silent fix — Claude's
+existing honesty behavior correctly reported that a real switchboard O&M
+manual exists in the library but wasn't retrieved for this question,
+rather than fabricating an answer from irrelevant content. The oil-
+pressure → "how often" follow-up still correctly retrieves and cites the
+real relevant page.
+
+**Real, disclosed residual limitation, not eliminated:** some
+tangentially-related prior-topic content can still rank low in results
+(one bilge schematic appeared at rank 3-4 during testing, not rank 1) —
+no longer displacing the genuinely relevant content, just not perfectly
+purged either. Worth revisiting only if a future real case shows this
+residual bleed actually burying a real answer, not merely ranking below
+it.
+
 ## ✅ RESOLVED — Missing page images traced to a real credential-duplication problem (Sept 2026)
 
 **What happened:** Dave asked a real question that cited three real,
