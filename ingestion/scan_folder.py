@@ -478,9 +478,20 @@ def scan_folder(folder: Path, engine: str = "voyage"):
         page_images.ensure_storage_bucket()
         images_enabled = True
     except ValueError:
-        print("Note: SUPABASE_URL/SUPABASE_SERVICE_KEY not set — skipping page image "
-              "rendering this run (text/embedding ingestion is unaffected). See "
-              "docs/architecture.md if you want to enable page images.\n")
+        # Made loud deliberately (Sept 2026, real incident) — the original
+        # quiet "Note:" here was real, but easy to lose in a long scroll of
+        # per-file ingestion output, and got missed for a whole real ingest
+        # run before the missing images were noticed days later, only when
+        # someone tried to actually view a source page. Repeated again at
+        # the very end of this function's output too, so it's not just at
+        # the top where later output can bury it.
+        print("\n" + "=" * 70)
+        print("⚠️  SUPABASE_URL/SUPABASE_SERVICE_KEY not set — NO PAGE IMAGES")
+        print("    will be created for anything ingested this run.")
+        print("    Text/embeddings are unaffected and fully searchable, but")
+        print("    'View Sources' will show these pages with no viewable image.")
+        print("    See docs/architecture.md if you want to enable page images.")
+        print("=" * 70 + "\n")
     except Exception as e:
         print(f"Note: page image storage isn't reachable right now ({e}) — skipping "
               f"page image rendering this run (text/embedding ingestion is unaffected).\n")
@@ -930,6 +941,14 @@ def scan_folder(folder: Path, engine: str = "voyage"):
     if total_issues:
         print(f"\n{total_issues} file(s) need your attention — see above. "
               f"Nothing else in the library was affected.")
+
+    if not images_enabled and new_chunk_count > 0:
+        print("\n" + "=" * 70)
+        print("⚠️  REMINDER: page images were NOT created this run "
+              "(SUPABASE_URL/SUPABASE_SERVICE_KEY not set).")
+        print(f"    Run backfill_page_images.py once those are set to add images")
+        print(f"    for the {new_chunk_count} chunk(s) just ingested.")
+        print("=" * 70)
 
 
 if __name__ == "__main__":

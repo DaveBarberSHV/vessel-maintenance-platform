@@ -103,8 +103,8 @@ this session, when all three of `SUPABASE_DB_URL`, `ANTHROPIC_API_KEY`,
 and `VOYAGE_API_KEY` ended up in chat this way.
 
 **The fix, going forward — a one-time setup, never repeated:**
-1. Dave creates a dedicated file (e.g. `~/.fathom_env`, outside the repo)
-   containing the three real `export VAR="..."` lines — typed directly in
+1. Dave creates a dedicated file (`~/.fathom_env`, outside the repo)
+   containing the real `export VAR="..."` lines — typed directly in
    an ordinary Terminal window that has no connection to Claude Code at
    all, never through the `!` prefix or any command Claude runs.
 2. `chmod 600 ~/.fathom_env` so only Dave can read it.
@@ -117,6 +117,23 @@ and `VOYAGE_API_KEY` ended up in chat this way.
    never the value) — Claude should never again construct a command that
    requires Dave to type a real secret value anywhere Claude can see it,
    including through `!`.
+
+**Real recurring problem, fixed for good (Sept 2026):** `~/.fathom_env`
+originally held its own separate, hardcoded copy of each `export VAR="..."`
+line — a second credential store alongside the one Dave already
+maintains at `~/.streamlit/secrets.toml` (a *global*, home-directory
+Streamlit secrets file, distinct from this repo's own
+`.streamlit/secrets.toml`). The two drifted out of sync more than once —
+most concretely, `~/.fathom_env` was missing `SUPABASE_URL` and
+`SUPABASE_SERVICE_KEY` entirely, which silently disabled page-image
+uploads during a real ingestion run without any obvious error at the
+time. `~/.fathom_env` now contains no hardcoded values at all — just a
+small loader that reads `~/.streamlit/secrets.toml` fresh every time it's
+sourced (see the file itself for the exact loader). Dave only has one
+real place to update a key going forward (`~/.streamlit/secrets.toml`,
+which he already reliably keeps current, e.g. rotating the Anthropic key
+there) — `~/.fathom_env` can't go stale on its own since it has nothing
+of its own to go stale.
 
 **Why this couldn't just be typed "right here, right now" mid-session:**
 environment variables are inherited by a process only at the moment it

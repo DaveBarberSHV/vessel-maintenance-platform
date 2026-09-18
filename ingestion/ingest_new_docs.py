@@ -37,6 +37,7 @@ Usage (from the ingestion/ directory):
 """
 import csv
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -202,6 +203,25 @@ def file_into_vessel_library(csv_path: Path, manifest_path: Path,
 
     return {"filed": filed, "left_in_inbox": left_in_inbox, "ingest_failed": ingest_failed}
 
+
+# ── Step -1: Credential pre-flight check ─────────────────────────────────────
+# Real incident (Sept 2026): SUPABASE_URL/SUPABASE_SERVICE_KEY were missing
+# for a whole real ingestion run, and the resulting "no page images"
+# warning (buried mid-scan_folder.py output) went unnoticed until someone
+# tried to view a source page days later. Checked here too, at the very
+# start, before any of the 7 steps below run, specifically so this is the
+# first thing seen — not a hard requirement (ingestion still fully works
+# without it, same reasoning as scan_folder.py itself), just impossible to
+# miss now.
+_missing_for_images = [v for v in ("SUPABASE_URL", "SUPABASE_SERVICE_KEY") if not os.environ.get(v)]
+if _missing_for_images:
+    print("\n" + "=" * 70)
+    print(f"⚠️  {' and '.join(_missing_for_images)} not set — page images will")
+    print("    NOT be created for anything ingested this run. Text/embeddings")
+    print("    are unaffected, but 'View Sources' will show no viewable image")
+    print("    for these documents until backfill_page_images.py is run later.")
+    print("=" * 70)
+    pause("Continue anyway, or Ctrl-C to fix credentials first.")
 
 # ── Step 0: List inbox contents ──────────────────────────────────────────────
 inbox_folder = Path(INBOX_PATH)

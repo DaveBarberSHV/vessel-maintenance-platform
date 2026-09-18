@@ -3,6 +3,58 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ RESOLVED — Missing page images traced to a real credential-duplication problem (Sept 2026)
+
+**What happened:** Dave asked a real question that cited three real,
+correctly-sourced pages (verified separately — see the Sources-filtering
+entry above), but two of the three had no viewable page image at all.
+Root cause: today's real ingestion runs (Genset, JAK, DuraCooler, and a
+Shafting/GEWES re-ingest during an earlier incident) all happened while
+`SUPABASE_URL`/`SUPABASE_SERVICE_KEY` were missing from the Claude Code
+session's environment — `scan_folder.py` did print a note about this at
+the time, but it was quiet enough to get lost in a long scroll of
+ingestion output and went unnoticed until someone tried to view a source
+page.
+
+**Deeper root cause, found while fixing it:** `~/.fathom_env` held its
+own separate, hardcoded copy of each credential, alongside the one Dave
+already reliably keeps current at `~/.streamlit/secrets.toml` (a global,
+home-directory Streamlit secrets file — distinct from this repo's own
+`.streamlit/secrets.toml`). The two drifted out of sync — `~/.fathom_env`
+was missing `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` entirely.
+
+**Also found and fixed along the way:** once corrected to read from
+`secrets.toml`, a *second*, unrelated real problem surfaced —
+`SUPABASE_SERVICE_KEY` there was a 31-character value matching neither
+of Supabase's real key formats (`eyJ...` legacy JWT or `sb_secret_...`
+current), and Supabase's own API rejected it outright
+(`"Invalid Compact JWS"`). Turned out to be a real, existing value in
+Dave's file that was missing its `sb_secret_` prefix — corrected from the
+Supabase dashboard directly.
+
+**Fixed, three layers:**
+1. `~/.fathom_env` no longer holds its own copy of any credential — it's
+   now a small loader that reads `~/.streamlit/secrets.toml` fresh every
+   time it's sourced (see `docs/working_with_dave.md`). One real place
+   for Dave to update a key going forward, not two that can drift.
+2. `~/.streamlit/secrets.toml`'s `SUPABASE_SERVICE_KEY` corrected to the
+   real, current value.
+3. The existing "Note:" in `scan_folder.py` about missing Storage
+   credentials is now a loud, boxed warning, printed both up front AND
+   again at the very end of the run (the last thing seen, hardest to
+   miss) — plus `ingest_new_docs.py` now checks for this upfront, before
+   any of its 7 pipeline steps run, with a pause so it can't be missed at
+   the very start of a real ingestion session either.
+
+**Recovered:** ran `backfill_page_images.py` against the whole library
+(safe, idempotent — skips anything that already has images) once the
+corrected credentials were in place. Filled in images for all 4 real
+documents affected: the Genset, JAK, and DuraCooler manuals from today,
+plus the Shafting/GEWES document re-ingested during the earlier
+rename-detection incident cleanup, which had the exact same gap for the
+same reason. Verified live: the original reported question now shows all
+three of its sources with viewable images.
+
 ## ✅ RESOLVED — Sources list showed irrelevant cross-equipment excerpts (Sept 2026)
 
 **What happened:** Real, reported case from Dave, first real question asked
