@@ -3,6 +3,55 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## ✅ RESOLVED — Sources list showed irrelevant cross-equipment excerpts (Sept 2026)
+
+**What happened:** Real, reported case from Dave, first real question asked
+against the newly-ingested Genset John Deere manual — "How do I change the
+fuel oil filter in the generator engine." The answer text was correct
+(verified directly: pages 93-94 of the real `Genset - JohnDeere 6068AFM85
+O&M Manual` match it almost verbatim), but the Sources list showed mostly
+CAT 3512E main engine pages instead of the generator manual, understandably
+alarming Dave into wondering whether the answer itself was wrong.
+
+**Confirmed directly, not assumed:** ran the exact real retrieval for this
+question — 7 of the 10 retrieved excerpts were from the main engine
+manual, only 3 from the correct Genset manual, because both engines'
+manuals describe generically similar fuel-filter procedures in similar
+language; semantic search can't tell "which specific engine" two
+similarly-worded procedures belong to. Traced Claude's own cited excerpt
+numbers in the real answer back to the real retrieval order and confirmed
+it had, in fact, only used the 3 correct Genset excerpts when writing the
+answer — the answer was right, but the Sources list (built from every
+retrieved excerpt, not just the ones actually used) didn't reflect that.
+
+**Fixed:** new `###EXCERPTS_USED###` section in `SYSTEM_PROMPT`, parsed by
+`parse_structured_response()` the same reliable way as the existing
+`FIELD_NOTE_IDS`/`SHOW_DOCUMENT` self-reported-number pattern. `get_answer()`
+now filters the chunks returned for display down to only the excerpt
+numbers Claude actually says it relied on — real, careful distinction
+between "Claude explicitly reported zero" (a legitimate empty Sources
+list — e.g. an Engineer-Notes-only answer) and "the markers were missing
+or malformed" (genuinely unknown, falls back to showing everything
+retrieved, never risking a real source silently disappearing over a
+parsing hiccup).
+
+**Verified live, three real cases:** the real reported generator question
+now shows exactly the 3 correct Genset pages, none of the 7 irrelevant CAT
+pages; the earlier-validated oil-grade question still correctly narrows to
+just its 2 real pages (even more precisely than before this fix); a
+genuinely out-of-scope question (tire pressure) correctly returns an empty
+Sources list rather than a wrong fallback.
+
+**Related, not fixed here:** this only cleans up the *display* — retrieval
+itself still spends real `top_k` slots on irrelevant cross-equipment
+content, which could crowd out genuinely relevant material on a question
+needing more supporting excerpts than this one did. A deeper fix (using
+the vessel equipment registry to bias retrieval toward the specific
+equipment a question names, e.g. "generator" vs "main engine") would
+address the root cause instead of just the symptom — not built now, real
+candidate for later if this crowds out a real answer on some future
+question.
+
 ## 🔺 PRIORITY, not yet fixed — scan_folder.py's rename-detection can silently orphan a real document (Sept 2026)
 
 **What happened:** Real, live incident during the first real test of the
@@ -285,6 +334,15 @@ no need to also solve NOTICE completeness.
 **Deliberately not fixed now — Dave's explicit call.** Flagged priority
 given this touches the product's core "safety-forward, verbatim" promise
 (`docs/product_vision.md`), not a cosmetic gap.
+
+**Second real supporting instance found (Sept 2026):** the "generator
+fuel filter" question (see the Sources-filtering entry below) surfaced a
+real `CAUTION: Escaping fluid under pressure can penetrate the skin...`
+statement on both real source pages (93-94 of the Genset John Deere
+manual) that also didn't appear in that answer's Safety Information —
+confirming this isn't a one-document CAT-manual quirk, the same
+extraction-completeness gap shows up on a completely different
+manufacturer's manual too.
 
 ## ✅ RESOLVED — "Full manuals" reference at the end of an answer (Sept 2026)
 

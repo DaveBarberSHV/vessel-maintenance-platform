@@ -243,6 +243,25 @@ detection here just means the image stays in the normal Sources list \
 instead of appearing prominently, which is a far smaller cost than \
 showing a large image on a question that didn't really ask for one.
 
+###EXCERPTS_USED###
+Real fix (Sept 2026) for a real, reported problem: retrieval can bring \
+back excerpts from the wrong piece of equipment (e.g. a generic fuel- \
+filter question pulls in the main engine's manual alongside the correct \
+generator manual, because the two describe similarly-worded procedures) \
+— you correctly ignore the wrong ones when writing the answer, but the \
+app's Sources list previously showed every retrieved excerpt regardless, \
+looking alarming even when the answer itself was accurate. List the \
+excerpt numbers you ACTUALLY drew on to construct the answer below, \
+comma-separated (e.g. "4, 5") — only ones whose content you genuinely \
+used, never every excerpt you were given, and never ones you considered \
+but judged irrelevant (like a different piece of equipment's manual). If \
+you didn't rely on any specific excerpt at all (e.g. the question was \
+answered entirely from Engineer Notes or the vessel equipment list), \
+write NONE. This is a real, code-driven filter (see get_answer() below) \
+that decides what the reader sees in "View Sources" — under-reporting a \
+real excerpt you used means a real citation goes missing, so only omit \
+one if you're genuinely confident you didn't use it.
+
 ###ANSWER###
 Your actual answer, following all the rules above. Do not repeat the \
 field note content or the safety information here in any form — they're \
@@ -296,9 +315,9 @@ now.
 
 def parse_structured_response(raw_text: str) -> dict:
     """Splits Claude's structured response (see SYSTEM_PROMPT's Response
-    Format section) into its four parts. Falls back gracefully to
-    treating the WHOLE response as the answer — no field notes, no
-    safety info, no show-document reference — if the expected markers
+    Format section) into its parts. Falls back gracefully to treating the
+    WHOLE response as the answer — no field notes, no safety info, no
+    show-document reference, no excerpts_used — if the expected markers
     aren't found or don't parse cleanly. This must never be the reason
     an answer fails to display, even on the rare response where Claude
     doesn't follow the format exactly.
@@ -309,16 +328,35 @@ def parse_structured_response(raw_text: str) -> dict:
     NUMBER(S) it means, and get_answer() below resolves those numbers
     into real image URLs from the chunks' own metadata — the same
     established pattern used for citations generally (code resolves
-    real data, Claude never has to know or report a URL itself)."""
-    result = {"field_note_ids": [], "safety_info": "", "show_document_excerpts": [], "answer": raw_text}
-    markers = ("###FIELD_NOTE_IDS###", "###SAFETY_INFO###", "###SHOW_DOCUMENT###", "###ANSWER###")
+    real data, Claude never has to know or report a URL itself).
+
+    excerpts_used added Sept 2026 — real bug found live: retrieval can
+    bring back excerpts from the wrong piece of equipment (similarly-
+    worded procedures across two different manuals), and while Claude
+    correctly ignored the wrong ones when writing the answer, the Sources
+    list previously showed every retrieved excerpt regardless — looking
+    alarming even when the answer itself was accurate. Deliberately
+    distinguishes "Claude reported NONE" (a real, legitimate empty list —
+    e.g. the answer came entirely from Engineer Notes) from "the markers
+    were missing/malformed" (None — genuinely unknown) so get_answer()
+    can tell "show zero sources, that's correct" apart from "something
+    went wrong parsing this, don't hide real sources over it." Only ever
+    narrows Sources down from what was actually retrieved — never adds
+    anything Claude wasn't actually given."""
+    result = {
+        "field_note_ids": [], "safety_info": "", "show_document_excerpts": [],
+        "excerpts_used": None, "answer": raw_text,
+    }
+    markers = ("###FIELD_NOTE_IDS###", "###SAFETY_INFO###", "###SHOW_DOCUMENT###",
+               "###EXCERPTS_USED###", "###ANSWER###")
     if not all(m in raw_text for m in markers):
         return result
     try:
         _, rest = raw_text.split(markers[0], 1)
         ids_part, rest = rest.split(markers[1], 1)
         safety_part, rest = rest.split(markers[2], 1)
-        show_part, answer_part = rest.split(markers[3], 1)
+        show_part, rest = rest.split(markers[3], 1)
+        excerpts_part, answer_part = rest.split(markers[4], 1)
 
         ids_part = ids_part.strip()
         if ids_part and ids_part.upper() != "NONE":
@@ -336,9 +374,20 @@ def parse_structured_response(raw_text: str) -> dict:
                 int(x.strip()) for x in show_part.split(",") if x.strip().isdigit()
             ]
 
+        excerpts_part = excerpts_part.strip()
+        if excerpts_part.upper() == "NONE":
+            result["excerpts_used"] = []
+        else:
+            result["excerpts_used"] = [
+                int(x.strip()) for x in excerpts_part.split(",") if x.strip().isdigit()
+            ]
+
         result["answer"] = answer_part.strip()
     except Exception:
-        return {"field_note_ids": [], "safety_info": "", "show_document_excerpts": [], "answer": raw_text}
+        return {
+            "field_note_ids": [], "safety_info": "", "show_document_excerpts": [],
+            "excerpts_used": None, "answer": raw_text,
+        }
     return result
 
 
@@ -903,9 +952,34 @@ def get_answer(question: str, engine: str = "voyage", top_k: int = 10,
                     "page_number": m["page_number"],
                 })
 
+    # Sources filtering (Sept 2026, real bug found live) — narrows the
+    # chunks shown in "View Sources" down to only the ones Claude actually
+    # says it drew on, via ###EXCERPTS_USED### above. Real motivating
+    # case: a generator-engine question retrieved 7 main-engine excerpts
+    # alongside 3 correct generator excerpts; Claude correctly used only
+    # the 3 real ones when writing the answer, but Sources previously
+    # showed all 10, looking alarming even though the answer itself was
+    # accurate.
+    #
+    # excerpts_used is None (not []) specifically when the markers were
+    # missing/malformed — genuinely unknown, not "Claude said zero" — and
+    # in that case this must fall back to the full original chunks rather
+    # than risk hiding real sources over a parsing hiccup. A non-empty
+    # excerpts_used that resolves to zero valid indices (Claude reported
+    # numbers, but none were valid — should be rare) gets the same safe
+    # fallback, for the same reason. Only a genuinely empty [] (Claude
+    # explicitly wrote NONE) is trusted to mean zero sources.
+    if parsed["excerpts_used"] is None:
+        source_chunks = chunks
+    else:
+        valid_indices = {n - 1 for n in parsed["excerpts_used"] if 0 <= n - 1 < len(chunks)}
+        source_chunks = [c for i, c in enumerate(chunks) if i in valid_indices]
+        if not source_chunks and parsed["excerpts_used"]:
+            source_chunks = chunks
+
     return {
         "answer": parsed["answer"],
-        "chunks": chunks,
+        "chunks": source_chunks,
         "prompt": prompt,
         "safety_info": parsed["safety_info"],
         "field_notes_used": field_notes_used,
