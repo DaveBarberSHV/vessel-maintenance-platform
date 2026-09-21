@@ -38,16 +38,21 @@ jobs:
       - name: Build and push image
         run: |
           # Workload Identity Federation credentials (external_account type)
-          # don't get a quota project wired into the ADC file automatically
-          # the way a service-account key does. Confirmed this is the real
-          # cause, not an IAM gap: Policy Troubleshooter showed the deployer
-          # SA's storage.admin grant as effectively GRANTED, and there are
-          # no IAM Deny policies anywhere in the resource hierarchy (project,
+          # don't get a quota project wired in automatically the way a
+          # service-account key does. Confirmed this is the real cause, not
+          # an IAM gap: Policy Troubleshooter showed the deployer SA's
+          # storage.admin grant as effectively GRANTED, and there are no IAM
+          # Deny policies anywhere in the resource hierarchy (project,
           # folder, or org) -- yet gcloud builds submit kept failing with
           # the same misleading "forbidden from accessing the bucket ...
-          # serviceusage.services.use" error regardless. Setting the quota
-          # project explicitly on the ADC credential fixes it.
-          gcloud auth application-default set-quota-project "$PROJECT_ID" --quiet
+          # serviceusage.services.use" error regardless.
+          # `gcloud auth application-default set-quota-project` doesn't
+          # work here -- it edits the canonical ADC file at a fixed path,
+          # which google-github-actions/auth@v2 doesn't populate for a WIF
+          # credential ("Application default credentials have not been set
+          # up"). The gcloud CLI config property works with any credential
+          # type instead.
+          gcloud config set billing/quota_project "$PROJECT_ID"
           gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}:${{ github.sha }}"
           gcloud builds submit --project="$PROJECT_ID" --tag "$IMAGE" .
