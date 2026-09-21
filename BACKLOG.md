@@ -3,6 +3,141 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
+## 🚧 IN PROGRESS — Migrating from Streamlit Cloud to Google Cloud Run + custom domain (Sept 2026)
+
+**What:** Moving the deployed app off Streamlit Cloud onto Google Cloud
+Run, served at `polaris.fathomvessel.com` (registered via GoDaddy),
+instead of the Streamlit-provided URL — mainly to drop the Streamlit
+"Fork"/logo chrome and get a real always-on custom domain.
+
+**Done so far:**
+- `requirements.txt` — added `pdfplumber` and `scikit-learn`. Real,
+  pre-existing bug found while tracing the app's actual import closure
+  for the Dockerfile: `answer_query.py` imports `extract_equipment_list.py`
+  (needs `pdfplumber` at module import time) and `retrieval.py` imports
+  `sklearn` (needs it for the offline `--engine tfidf` fallback) — both
+  missing from this file. Neither import site crashes without it (both
+  are wrapped in try/except), so this was likely silently disabling the
+  vessel equipment registry context on the live Streamlit Cloud app too,
+  with no visible error. Worth Dave spot-checking a registry-dependent
+  question against the current Streamlit Cloud app to see if answers
+  change once it also picks up this fix.
+- `Dockerfile` — `python:3.11-slim`, installs `requirements.txt`, runs
+  `streamlit run app.py` on port 8080.
+- `.dockerignore` — the originally pasted migration plan assumed
+  `engineer_notes.py`/`document_inventory.py` are top-level files and said
+  to exclude all of `ingestion/`. Checked the real repo layout instead:
+  both those files, plus `answer_query.py`, `retrieval.py`, and
+  `extract_equipment_list.py`, all live inside `ingestion/` and are
+  genuinely imported by `app.py` at runtime — excluding the whole folder
+  as originally planned would have broken the deployed app outright.
+  Fixed to exclude only specific non-runtime files inside `ingestion/`
+  (its own `requirements.txt`, `chroma_db/`, `__pycache__/`, `*.jsonl`)
+  and keep the actual Python modules. Also corrected the plan's "exclude
+  `.streamlit/`" instruction — that folder holds both the real secret
+  (`secrets.toml`, now excluded by name) and the app's navy/brass theme
+  (`config.toml`, non-secret, kept so Cloud Run keeps the same branding).
+- Verified locally: `docker build` succeeds, container boots clean
+  (`/_stcore/health` returns 200, no tracebacks in logs), all 5 required
+  `ingestion/` modules and the theme file present inside the built image,
+  `.streamlit/secrets.toml`/`docs/`/`BACKLOG.md` confirmed absent.
+- `deploy/setup_cloud_run.sh` (Phase 2) — enables required APIs, creates
+  the Artifact Registry repo, builds/pushes the image, deploys to Cloud
+  Run (`min-instances=1` so it never sleeps, secrets mounted from Secret
+  Manager). **Secrets handling deliberately changed from the original
+  plan:** the plan called for the script to interactively prompt for
+  each of `VOYAGE_API_KEY`/`ANTHROPIC_API_KEY`/`SUPABASE_DB_URL`. Since
+  all three already live correctly in `~/.streamlit/secrets.toml` and get
+  loaded into the shell via `~/.fathom_env` (see the credential-
+  duplication incident above), adding a second interactive-prompt path
+  would just create a new place for these to drift or get mistyped.
+  Instead the script reads them from the environment it's run in
+  (`source ~/.fathom_env` first) and fails loudly if any are missing —
+  no prompt, no file, never echoed.
+- `deploy/setup_domain.sh` (Phase 3) — maps `polaris.fathomvessel.com` to
+  the Cloud Run service, prints the DNS record to add in GoDaddy.
+- `deploy/setup_workload_identity.sh` + `.github/workflows/deploy.yml`
+  (Phase 4) — one-time Workload Identity Federation setup (no downloadable
+  service-account key) so pushes to `main` auto-deploy.
+
+**Update (Sept 21 2026) — Cloud Run is live, domain mapping in
+progress:**
+- Ran `setup_cloud_run.sh` for real. Hit two real, one-time GCP
+  permission gaps along the way (both a known, common gotcha on newer
+  GCP projects — the Compute Engine default service account
+  `679820435022-compute@developer.gserviceaccount.com`, which Cloud
+  Build and Cloud Run both use by default, no longer gets broad
+  permissions automatically). Fixed by granting that service account
+  exactly two roles, nothing broader:
+  `roles/cloudbuild.builds.builder` (needed to read its own uploaded
+  build source) and `roles/secretmanager.secretAccessor` (needed for the
+  running container to read the 3 secrets). Both are one-time, project-
+  level IAM grants — not something `setup_cloud_run.sh` itself does, so
+  worth knowing about if this is ever re-run from a fresh GCP project.
+- Cloud Run service is deployed and **Dave has verified it working
+  end-to-end** at `https://fathom-polaris-679820435022.us-west1.run.app`.
+- Ran `setup_domain.sh`. Needed the `gcloud beta` component installed
+  first (one-time, `gcloud components install beta`), and Google
+  required domain-ownership verification via Search Console before it
+  would create the mapping — done for the whole `fathomvessel.com`
+  domain (not just the `polaris.` subdomain) via a DNS TXT record, so
+  any future subdomain won't need to repeat this step.
+- Domain mapping created; DNS record needed in GoDaddy: CNAME,
+  name `polaris`, value `ghs.googlehosted.com.`. Dave added it —
+  confirmed resolving correctly (`dig` from this machine already shows
+  the CNAME).
+- **`polaris.fathomvessel.com` is now live** — Google's SSL certificate
+  finished provisioning well inside the normal 24-48 hour window
+  (confirmed via real request logs showing 200s on the custom domain).
+- Not yet done: `setup_workload_identity.sh` + confirming the
+  `.github/workflows/deploy.yml` auto-deploy actually works — deferred
+  until the custom domain is fully verified end-to-end, per the original
+  plan's Phase 5 ordering.
+
+**Update (Sept 21 2026) — Secret Manager IAM hardened, dedicated
+runtime service account:**
+- A NIST 800-171-oriented review of the project's IAM surface (Dave's
+  request) turned up two real, worth-fixing gaps: (1) the compute default
+  SA (`679820435022-compute@developer.gserviceaccount.com`) had
+  `secretAccessor` at the **project level**, meaning it could read any
+  secret ever added to this project, not just Fathom's 3; (2) that same
+  shared, Google-provided default SA — used by every Compute Engine/
+  Cloud Build/Cloud Run resource in the project unless told otherwise —
+  was also the app's actual runtime identity, rather than a dedicated
+  one scoped to just this app.
+- Fixed both. Created a dedicated runtime service account,
+  `fathom-polaris-run@project-dbe3feed-c30f-4b89-a65.iam.gserviceaccount.com`
+  (note: the project's *display name* is "fathom-vessel" but its actual
+  *project ID* — the only thing valid in a service-account email — is
+  `project-dbe3feed-c30f-4b89-a65`; a first draft of this SA email using
+  the display name would not have worked). Granted it `secretAccessor`
+  on each of the 3 secrets **individually**, not project-wide, plus
+  `logging.logWriter`/`monitoring.metricWriter` (a custom Cloud Run
+  runtime SA needs these granted explicitly — the default SA gets them
+  for free, so skipping this would have silently killed Cloud Run
+  logging with no obvious symptom). Redeployed Cloud Run with
+  `--service-account` pointing at it, verified the new revision reads
+  all 3 secrets correctly and serves both URLs with clean logs, then
+  removed the compute default SA's now-unnecessary secret bindings
+  (both the leftover project-level grant and its own per-secret ones) —
+  it retains only what Cloud Build actually needs
+  (`cloudbuild.builds.builder`) to build/push images.
+- Updated `deploy/setup_cloud_run.sh` and `.github/workflows/deploy.yml`
+  to create/use this dedicated SA going forward. Without that, the next
+  script run or CI/CD deploy would have silently fallen back to the
+  default SA on redeploy and undone this hardening with no warning.
+- **Still open, not yet done, from the same review** — worth revisiting
+  before a compliance-focused audience sees the app: auth is currently a
+  free-text name field with no password (already tracked separately,
+  see the Auth item elsewhere in this file), and there's no Secret
+  Manager/Cloud Run data-access audit logging enabled yet beyond GCP's
+  default Admin Activity logs — ties into the existing "Security audit
+  log — 30-day commitment" item.
+
+**Streamlit Cloud is untouched and stays live in parallel** until Dave
+has verified `polaris.fathomvessel.com` end-to-end — retiring it is a
+separate, later, non-automated step.
+
 ## ✅ RESOLVED — Conversation context bleeding into an unrelated topic change (Sept 2026)
 
 **What happened:** Real, reported case — after asking about bilge drain

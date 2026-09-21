@@ -1,0 +1,49 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+
+env:
+  PROJECT_ID: project-dbe3feed-c30f-4b89-a65
+  REGION: us-west1
+  SERVICE_NAME: fathom-polaris
+  REPO_NAME: fathom-polaris
+  # Dedicated runtime SA (Sept 2026 IAM hardening) -- see deploy/setup_cloud_run.sh
+  # for why this must not be omitted: omitting --service-account below falls back
+  # to the Compute Engine default SA and silently undoes that hardening.
+  RUN_SA: fathom-polaris-run@project-dbe3feed-c30f-4b89-a65.iam.gserviceaccount.com
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push image
+        run: |
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}:${{ github.sha }}"
+          gcloud builds submit --tag "$IMAGE" .
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "$SERVICE_NAME" \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --platform=managed \
+            --service-account="$RUN_SA" \
+            --quiet

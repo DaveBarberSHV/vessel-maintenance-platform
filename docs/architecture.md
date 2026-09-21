@@ -251,15 +251,56 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A["🔲 Jared/Dave<br/>Opens chat UI"] --> B["✅ Streamlit app<br/>Live on Streamlit Cloud"]
+    A["🔲 Jared/Dave<br/>Opens chat UI"] --> B["✅ Streamlit app<br/>(same Docker image either way)"]
     B --> C["✅ Existing retrieval +<br/>Claude API (reused, not rebuilt)"]
     C --> D["✅ Supabase Postgres<br/>Persistent chat history"]
     D --> B
 ```
 
-Live and in real use as of Aug 2026 — deployed to Streamlit Community
-Cloud, real questions asked by both Dave and Jared, real bugs found and
-fixed against production data (see `BACKLOG.md`).
+Live and in real use as of Aug 2026 — originally deployed to Streamlit
+Community Cloud, real questions asked by both Dave and Jared, real bugs
+found and fixed against production data (see `BACKLOG.md`).
+
+**Migrated to Google Cloud Run at a custom domain (Sept 2026).** Same
+`app.py`, same Supabase/pgvector backend — only where it's hosted
+changed, via a `Dockerfile` at the repo root (`python:3.11-slim`, not
+the `python3.14` ingestion uses locally — the deployed app doesn't need
+it). Secrets moved from Streamlit's `st.secrets` to Google Secret
+Manager, injected as environment variables (`app.py` and `db.py` already
+supported reading either — see their credential-loading code — so no
+app code changes were needed).
+
+- **Live at `https://polaris.fathomvessel.com`** (Cloud Run, region
+  `us-west1`, `min-instances=1` so it never sleeps) — Dave has verified
+  it end-to-end. The Cloud Run-provided URL
+  (`https://fathom-polaris-679820435022.us-west1.run.app`) also still
+  works directly.
+- **Streamlit Cloud is deliberately left running in parallel**,
+  untouched, until Dave is fully confident in the Cloud Run deployment —
+  retiring it is a separate, later, non-automated step. See `BACKLOG.md`
+  for the full migration log and current status.
+- **IAM hardened (Sept 21 2026)**, prompted by a compliance review:
+  the app runs under a dedicated service account,
+  `fathom-polaris-run@project-dbe3feed-c30f-4b89-a65.iam.gserviceaccount.com`
+  — not the shared Compute Engine default SA every other GCP resource in
+  the project uses unless told otherwise. It can read exactly the 3
+  secrets Fathom needs (`VOYAGE_API_KEY`, `ANTHROPIC_API_KEY`,
+  `SUPABASE_DB_URL`), each granted individually, not at the project
+  level — so it has no access to any secret added to this project later
+  for something unrelated.
+- **Known, tracked gap, not yet closed**: the infra layer (Cloud Run
+  `allUsers` invoker) is intentionally public — access control is meant
+  to happen at the app layer instead — but that app-layer gate is
+  currently just a free-text name field with no password (see the Auth
+  item in `BACKLOG.md`). Worth closing before this goes in front of
+  anyone doing a real security/compliance review of the running system,
+  not just its cloud IAM.
+- Deploy scripts live under `deploy/` (`setup_cloud_run.sh`,
+  `setup_domain.sh`, `setup_workload_identity.sh`) plus
+  `.github/workflows/deploy.yml` for CI/CD auto-deploy on push to
+  `main` (Workload Identity Federation, no downloadable service-account
+  key) — set up but not yet turned on; deferred until the custom domain
+  was fully verified, which it now is.
 
 - **Framework: Streamlit.** Confirmed the right call in practice — one
   Python codebase, no separate API layer, fast to iterate.

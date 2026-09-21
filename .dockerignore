@@ -1,0 +1,38 @@
+.git
+.claude
+__pycache__/
+*.pyc
+*.pyo
+
+# Local secrets file — Cloud Run gets these 3 values from Secret Manager
+# env vars instead (see deploy/setup_cloud_run.sh). Do NOT exclude the
+# whole .streamlit/ folder: config.toml there is the app's navy/brass
+# theme, not a secret, and the deployed app should keep it.
+.streamlit/secrets.toml
+
+# Docs, BACKLOG, and non-README markdown — reference material for Dave/
+# Claude Code sessions, not read by the running app.
+docs/
+BACKLOG.md
+*.md
+!README.md
+
+# Scratch/reviewed-by-hand CSVs and the equipment manifest JSON — none
+# read by app.py at runtime (see .gitignore for why these exist at all).
+manifest.json
+rename_proposals.csv
+rename_log.csv
+equipment_manifest_gap_report.csv
+
+# Ingestion is a Dave-run local process (needs python3.14, not the 3.11
+# in this image) with its own requirements.txt — but ingestion/*.py
+# itself is NOT excluded here: answer_query.py, retrieval.py,
+# document_inventory.py, engineer_notes.py, and extract_equipment_list.py
+# all live in ingestion/ and are genuinely imported by app.py at runtime.
+ingestion/requirements.txt
+ingestion/__pycache__/
+ingestion/*.pyc
+ingestion/chroma_db/
+ingestion/*.jsonl
+
+*.xlsx

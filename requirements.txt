@@ -8,3 +8,18 @@ voyageai
 anthropic
 psycopg2-binary
 bcrypt
+# Real gap found live (Sept 2026, during the Cloud Run migration): both
+# missing here despite being genuine, module-level imports of code the
+# deployed app actually runs. answer_query.py imports
+# extract_equipment_list.py (for the vessel equipment registry context
+# injected into every question) which imports pdfplumber at module level
+# even though the deployed app never parses a PDF itself; retrieval.py
+# imports sklearn at module level for the offline --engine tfidf
+# fallback path. Missing packages here don't crash the app outright
+# (both import sites are wrapped in a try/except, degrading silently
+# per this project's own "never let this be why a question fails"
+# pattern) -- but that means the equipment registry context may have
+# been silently absent from every single question on the current,
+# already-live Streamlit Cloud deployment without any visible error.
+pdfplumber
+scikit-learn
