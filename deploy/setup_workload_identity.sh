@@ -28,7 +28,15 @@ gcloud iam service-accounts describe "$SA_EMAIL" >/dev/null 2>&1 || \
   gcloud iam service-accounts create "$SA_NAME" --display-name="GitHub Actions deployer"
 
 echo "==> Granting deploy permissions to the service account..."
-for role in roles/run.admin roles/artifactregistry.writer roles/iam.serviceAccountUser roles/secretmanager.secretAccessor; do
+# cloudbuild.builds.editor is required to even submit a build
+# (cloudbuild.builds.create) -- found missing the hard way (Sept 2026,
+# first real CI/CD run failed at "gcloud builds submit" with no
+# cloudbuild role granted at all). Don't confuse this with
+# cloudbuild.builds.builder, which is a different role for the account
+# that *executes* a build (see the compute default SA's grants in
+# setup_cloud_run.sh) -- the submitter and the executor need different
+# roles.
+for role in roles/run.admin roles/artifactregistry.writer roles/iam.serviceAccountUser roles/secretmanager.secretAccessor roles/cloudbuild.builds.editor; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:${SA_EMAIL}" \
     --role="$role" \
