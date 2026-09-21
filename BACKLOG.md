@@ -143,6 +143,85 @@ runtime service account:**
   default Admin Activity logs — ties into the existing "Security audit
   log — 30-day commitment" item.
 
+**Update (Sept 21 2026) — CI/CD auto-deploy: real failure chain, now
+fixed and working.** The first push after wiring up
+`.github/workflows/deploy.yml` failed at `gcloud builds submit`, and
+kept failing with the exact same error —
+`"The user is forbidden from accessing the bucket
+[project-dbe3feed-c30f-4b89-a65_cloudbuild]. ... check ...
+serviceusage.services.use ..."` — across every fix tried, which is
+what eventually revealed the real cause wasn't IAM at all:
+1. First real gap: `github-deployer` had no Cloud Build role
+   whatsoever, so it couldn't even submit a build
+   (`cloudbuild.builds.create`, part of `roles/cloudbuild.builds.editor`
+   — distinct from `roles/cloudbuild.builds.builder`, which is for the
+   account that *executes* a build, already granted to the compute
+   default SA in `setup_cloud_run.sh`). Granted it — error unchanged.
+2. Second theory: the GCS staging bucket upload is a separate Storage
+   operation, not covered by any Cloud Build role. Granted
+   `storage.objectAdmin` on just that bucket — error unchanged. Escalated
+   to `storage.admin` (objectAdmin doesn't cover `storage.buckets.get`,
+   which this bucket-level check needs) — error still unchanged.
+3. Third theory, matching the error message's own hint: granted
+   `serviceusage.serviceUsageConsumer` at the project level (blocked
+   once by this session's safety classifier for being a permission
+   grant; Dave approved it explicitly) — error still unchanged.
+4. At this point, waited a full 2 minutes before retrying (to rule out
+   IAM propagation lag specifically, since every fix so far had been
+   retested within seconds) — still the exact same error, ruling out
+   propagation as the explanation for why nothing was working.
+5. Discovered via `gcloud policy-troubleshoot iam` (had to enable the
+   Policy Troubleshooter API first) that the project sits under a real
+   Google Cloud organization, `dave-safeharbour-org`
+   (`organizations/902415052184`) — **auto-created that same day**,
+   almost certainly as a side effect of the `fathomvessel.com` domain
+   verification done earlier for the custom-domain mapping. Checked for
+   IAM Deny policies (a newer, separate-from-normal-IAM "block this
+   regardless of any Allow grant" mechanism) at every level — required
+   granting Dave's own account `roles/iam.denyAdmin` at the org level
+   first (also blocked once by the safety classifier; Dave ran the
+   grant himself). **Found: no Deny policies anywhere** — project,
+   folder, or org. Also confirmed via Policy Troubleshooter that both
+   `storage.buckets.get` on the bucket and `serviceusage.services.use`
+   on the project were showing as effectively **GRANTED** for
+   `github-deployer`. So the permissions really were correct — and the
+   live error still, somehow, never changed.
+6. Tried the Workload-Identity-Federation-specific quota-project angle:
+   `gcloud auth application-default set-quota-project` failed outright
+   ("Application default credentials have not been set up" —
+   `google-github-actions/auth@v2` doesn't populate the canonical ADC
+   file path that command edits for a WIF credential). Switched to
+   `gcloud config set billing/quota_project`, which does work with any
+   credential type — ran cleanly, but the build still failed with the
+   same bucket error.
+7. **Actual fix**: gave up on `gcloud builds submit` entirely and had
+   the workflow build and push the Docker image directly on the GitHub
+   runner (`docker build` + `docker push`) instead, which never touches
+   Cloud Build's GCS staging bucket at all. First try — succeeded
+   completely, all steps green, new Cloud Run revision live with a
+   clean health check. The real lesson: `gcloud builds submit`'s
+   default local-source-to-GCS-then-Cloud-Build path appears to have a
+   genuine, hard-to-diagnose incompatibility with Workload Identity
+   Federation credentials specifically — not a permission problem at
+   all, despite an error message that insistently, consistently pointed
+   at IAM the entire time.
+8. Cleaned up afterward: removed the 3 roles/bindings granted chasing
+   the wrong theories (`cloudbuild.builds.editor`,
+   `serviceusage.serviceUsageConsumer`, and the bucket-scoped
+   `storage.admin`) from both the live `github-deployer` SA and
+   `deploy/setup_workload_identity.sh`, since none of them were ever
+   the real fix and the new build path doesn't need them.
+   `github-deployer` now holds exactly 4 roles: `run.admin`,
+   `artifactregistry.writer`, `iam.serviceAccountUser`,
+   `secretmanager.secretAccessor`. Left Dave's own `iam.denyAdmin` grant
+   in place (harmless, and useful if this kind of Deny-policy check is
+   ever needed again).
+- **Worth knowing if this ever needs debugging again**: don't trust an
+  unchanging gcloud error message as proof the same layer keeps being
+  wrong — use `gcloud policy-troubleshoot iam` early to get a real,
+  authoritative answer on effective access instead of guessing at IAM
+  fixes one at a time.
+
 **Streamlit Cloud has been retired.** Dave ran it in parallel, untouched,
 until he'd verified `polaris.fathomvessel.com` end-to-end, then deleted
 the Streamlit Cloud app entirely — which also removed Streamlit's own

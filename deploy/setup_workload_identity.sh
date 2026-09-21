@@ -28,53 +28,28 @@ gcloud iam service-accounts describe "$SA_EMAIL" >/dev/null 2>&1 || \
   gcloud iam service-accounts create "$SA_NAME" --display-name="GitHub Actions deployer"
 
 echo "==> Granting deploy permissions to the service account..."
-# cloudbuild.builds.editor is required to even submit a build
-# (cloudbuild.builds.create) -- found missing the hard way (Sept 2026,
-# first real CI/CD run failed at "gcloud builds submit" with no
-# cloudbuild role granted at all). Don't confuse this with
-# cloudbuild.builds.builder, which is a different role for the account
-# that *executes* a build (see the compute default SA's grants in
-# setup_cloud_run.sh) -- the submitter and the executor need different
-# roles.
-# serviceusage.serviceUsageConsumer: needed to make billed/quota-checked
-# API calls against the project at all (Owner gets this implicitly,
-# a plain SA doesn't). Third real CI/CD failure, and the one that
-# turned out to actually matter -- the "forbidden from accessing the
-# bucket [...]" error stayed byte-for-byte identical across two
-# different bucket-IAM fixes (objectAdmin, then admin), which is what
-# gave away that bucket ACLs were never the real blocker; the error
-# message's own mention of "serviceusage.services.use" was the real
-# clue, easy to dismiss as a generic gcloud suggestion.
-for role in roles/run.admin roles/artifactregistry.writer roles/iam.serviceAccountUser roles/secretmanager.secretAccessor roles/cloudbuild.builds.editor roles/serviceusage.serviceUsageConsumer; do
+# Exactly 4 roles needed. Earlier versions of this script also granted
+# cloudbuild.builds.editor, a per-bucket roles/storage.admin on the
+# Cloud Build staging bucket, and roles/serviceusage.serviceUsageConsumer
+# -- all chasing a "forbidden from accessing the bucket ...
+# serviceusage.services.use" error from `gcloud builds submit` that
+# turned out to be a real gcloud/Workload-Identity-Federation quirk in
+# how that command's GCS-upload path carries the impersonated identity,
+# not an actual permission gap (confirmed via IAM Policy Troubleshooter:
+# every one of those roles showed as effectively GRANTED, and no IAM
+# Deny policies existed anywhere in the project/folder/org hierarchy --
+# yet the error never changed). The real fix was in
+# .github/workflows/deploy.yml: build and push the Docker image
+# directly on the GitHub runner instead of via `gcloud builds submit`,
+# which never touches that bucket at all. See BACKLOG.md for the full
+# story. Don't re-add those 3 roles unless deploy.yml goes back to
+# using `gcloud builds submit`.
+for role in roles/run.admin roles/artifactregistry.writer roles/iam.serviceAccountUser roles/secretmanager.secretAccessor; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:${SA_EMAIL}" \
     --role="$role" \
     --condition=None >/dev/null
 done
-
-# cloudbuild.builds.editor above is NOT enough on its own -- gcloud
-# builds submit separately uploads your source to an auto-created GCS
-# bucket ("${PROJECT_ID}_cloudbuild"), and that upload is a plain
-# Storage operation, checked against Storage IAM, not any Cloud Build
-# role. Found this the hard way too (Sept 2026, second real CI/CD
-# failure): "The user is forbidden from accessing the bucket
-# [${PROJECT_ID}_cloudbuild]". roles/storage.objectAdmin alone wasn't
-# enough either -- still hit the same error, because gcloud builds
-# submit also checks bucket-level metadata (storage.buckets.get), which
-# objectAdmin doesn't include. roles/storage.admin does, and is still
-# scoped to just this one bucket, not project-wide Storage access.
-CLOUDBUILD_BUCKET="gs://${PROJECT_ID}_cloudbuild"
-if gcloud storage buckets describe "$CLOUDBUILD_BUCKET" >/dev/null 2>&1; then
-  gcloud storage buckets add-iam-policy-binding "$CLOUDBUILD_BUCKET" \
-    --member="serviceAccount:${SA_EMAIL}" \
-    --role="roles/storage.admin" >/dev/null
-else
-  echo "NOTE: ${CLOUDBUILD_BUCKET} doesn't exist yet (it's created by the" >&2
-  echo "first-ever 'gcloud builds submit' in this project, e.g. via" >&2
-  echo "setup_cloud_run.sh). Re-run this script after that's happened at" >&2
-  echo "least once, or the CI/CD build step will fail with a Storage" >&2
-  echo "permission error." >&2
-fi
 
 echo "==> Creating Workload Identity Pool (if it doesn't exist)..."
 gcloud iam workload-identity-pools describe "$POOL_NAME" --location=global >/dev/null 2>&1 || \
