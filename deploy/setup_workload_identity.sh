@@ -49,13 +49,16 @@ done
 # Storage operation, checked against Storage IAM, not any Cloud Build
 # role. Found this the hard way too (Sept 2026, second real CI/CD
 # failure): "The user is forbidden from accessing the bucket
-# [${PROJECT_ID}_cloudbuild]". Scoped to just this one bucket, not
-# project-wide Storage access, to keep this minimal.
+# [${PROJECT_ID}_cloudbuild]". roles/storage.objectAdmin alone wasn't
+# enough either -- still hit the same error, because gcloud builds
+# submit also checks bucket-level metadata (storage.buckets.get), which
+# objectAdmin doesn't include. roles/storage.admin does, and is still
+# scoped to just this one bucket, not project-wide Storage access.
 CLOUDBUILD_BUCKET="gs://${PROJECT_ID}_cloudbuild"
 if gcloud storage buckets describe "$CLOUDBUILD_BUCKET" >/dev/null 2>&1; then
   gcloud storage buckets add-iam-policy-binding "$CLOUDBUILD_BUCKET" \
     --member="serviceAccount:${SA_EMAIL}" \
-    --role="roles/storage.objectAdmin" >/dev/null
+    --role="roles/storage.admin" >/dev/null
 else
   echo "NOTE: ${CLOUDBUILD_BUCKET} doesn't exist yet (it's created by the" >&2
   echo "first-ever 'gcloud builds submit' in this project, e.g. via" >&2
