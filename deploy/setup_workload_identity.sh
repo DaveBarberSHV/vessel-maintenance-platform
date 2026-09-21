@@ -36,7 +36,16 @@ echo "==> Granting deploy permissions to the service account..."
 # that *executes* a build (see the compute default SA's grants in
 # setup_cloud_run.sh) -- the submitter and the executor need different
 # roles.
-for role in roles/run.admin roles/artifactregistry.writer roles/iam.serviceAccountUser roles/secretmanager.secretAccessor roles/cloudbuild.builds.editor; do
+# serviceusage.serviceUsageConsumer: needed to make billed/quota-checked
+# API calls against the project at all (Owner gets this implicitly,
+# a plain SA doesn't). Third real CI/CD failure, and the one that
+# turned out to actually matter -- the "forbidden from accessing the
+# bucket [...]" error stayed byte-for-byte identical across two
+# different bucket-IAM fixes (objectAdmin, then admin), which is what
+# gave away that bucket ACLs were never the real blocker; the error
+# message's own mention of "serviceusage.services.use" was the real
+# clue, easy to dismiss as a generic gcloud suggestion.
+for role in roles/run.admin roles/artifactregistry.writer roles/iam.serviceAccountUser roles/secretmanager.secretAccessor roles/cloudbuild.builds.editor roles/serviceusage.serviceUsageConsumer; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:${SA_EMAIL}" \
     --role="$role" \
