@@ -37,15 +37,19 @@ jobs:
 
       - name: Build and push image
         run: |
+          # Workload Identity Federation credentials (external_account type)
+          # don't get a quota project wired into the ADC file automatically
+          # the way a service-account key does. Confirmed this is the real
+          # cause, not an IAM gap: Policy Troubleshooter showed the deployer
+          # SA's storage.admin grant as effectively GRANTED, and there are
+          # no IAM Deny policies anywhere in the resource hierarchy (project,
+          # folder, or org) -- yet gcloud builds submit kept failing with
+          # the same misleading "forbidden from accessing the bucket ...
+          # serviceusage.services.use" error regardless. Setting the quota
+          # project explicitly on the ADC credential fixes it.
+          gcloud auth application-default set-quota-project "$PROJECT_ID" --quiet
           gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}:${{ github.sha }}"
-          # --project explicitly: Workload Identity Federation credentials
-          # (external_account) have no implicit quota project the way a
-          # user account or a service-account key does, so gcloud builds
-          # submit's source upload otherwise fails with a misleading
-          # "forbidden from accessing the bucket ... serviceusage" error
-          # regardless of what IAM roles the deployer SA holds -- found
-          # this the hard way after 3 IAM grants that didn't fix it.
           gcloud builds submit --project="$PROJECT_ID" --tag "$IMAGE" .
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
