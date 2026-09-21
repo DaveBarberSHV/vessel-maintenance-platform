@@ -37,25 +37,25 @@ jobs:
 
       - name: Build and push image
         run: |
-          # Workload Identity Federation credentials (external_account type)
-          # don't get a quota project wired in automatically the way a
-          # service-account key does. Confirmed this is the real cause, not
-          # an IAM gap: Policy Troubleshooter showed the deployer SA's
-          # storage.admin grant as effectively GRANTED, and there are no IAM
-          # Deny policies anywhere in the resource hierarchy (project,
-          # folder, or org) -- yet gcloud builds submit kept failing with
-          # the same misleading "forbidden from accessing the bucket ...
-          # serviceusage.services.use" error regardless.
-          # `gcloud auth application-default set-quota-project` doesn't
-          # work here -- it edits the canonical ADC file at a fixed path,
-          # which google-github-actions/auth@v2 doesn't populate for a WIF
-          # credential ("Application default credentials have not been set
-          # up"). The gcloud CLI config property works with any credential
-          # type instead.
-          gcloud config set billing/quota_project "$PROJECT_ID"
+          # Deliberately NOT using `gcloud builds submit` here. That path
+          # uploads source to an auto-created GCS staging bucket first,
+          # and kept failing with "forbidden from accessing the bucket ...
+          # serviceusage.services.use" no matter what was fixed --
+          # Policy Troubleshooter confirmed both the relevant Storage
+          # permission AND serviceusage.services.use as effectively
+          # GRANTED for this SA, and confirmed no IAM Deny policies exist
+          # anywhere in the resource hierarchy (project, folder, or org).
+          # That combination points to a gcloud/Workload-Identity-
+          # Federation quirk in how that specific upload path carries the
+          # impersonated identity, not a real permission gap. Building
+          # and pushing the image directly avoids Cloud Build's staging
+          # bucket entirely -- GitHub's runner has Docker built in, and
+          # `docker push` to Artifact Registry only needs
+          # artifactregistry.writer, which the deployer SA already has.
           gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}:${{ github.sha }}"
-          gcloud builds submit --project="$PROJECT_ID" --tag "$IMAGE" .
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Deploy to Cloud Run
