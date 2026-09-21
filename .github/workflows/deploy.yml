@@ -29,19 +29,30 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.PROJECT_ID }}
 
       - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
 
       - name: Build and push image
         run: |
           gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}:${{ github.sha }}"
-          gcloud builds submit --tag "$IMAGE" .
+          # --project explicitly: Workload Identity Federation credentials
+          # (external_account) have no implicit quota project the way a
+          # user account or a service-account key does, so gcloud builds
+          # submit's source upload otherwise fails with a misleading
+          # "forbidden from accessing the bucket ... serviceusage" error
+          # regardless of what IAM roles the deployer SA holds -- found
+          # this the hard way after 3 IAM grants that didn't fix it.
+          gcloud builds submit --project="$PROJECT_ID" --tag "$IMAGE" .
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy "$SERVICE_NAME" \
+            --project="$PROJECT_ID" \
             --image="$IMAGE" \
             --region="$REGION" \
             --platform=managed \
