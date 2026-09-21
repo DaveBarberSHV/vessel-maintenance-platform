@@ -275,10 +275,11 @@ app code changes were needed).
   it end-to-end. The Cloud Run-provided URL
   (`https://fathom-polaris-679820435022.us-west1.run.app`) also still
   works directly.
-- **Streamlit Cloud is deliberately left running in parallel**,
-  untouched, until Dave is fully confident in the Cloud Run deployment —
-  retiring it is a separate, later, non-automated step. See `BACKLOG.md`
-  for the full migration log and current status.
+- **Streamlit Cloud has been retired** (Sept 2026) — Dave ran it in
+  parallel, untouched, until he'd verified Cloud Run end-to-end at the
+  custom domain, then deleted the Streamlit Cloud app entirely (which
+  also removed Streamlit's own separate copy of the 3 secrets from
+  their servers). See `BACKLOG.md` for the full migration log.
 - **IAM hardened (Sept 21 2026)**, prompted by a compliance review:
   the app runs under a dedicated service account,
   `fathom-polaris-run@project-dbe3feed-c30f-4b89-a65.iam.gserviceaccount.com`
@@ -299,8 +300,12 @@ app code changes were needed).
   `setup_domain.sh`, `setup_workload_identity.sh`) plus
   `.github/workflows/deploy.yml` for CI/CD auto-deploy on push to
   `main` (Workload Identity Federation, no downloadable service-account
-  key) — set up but not yet turned on; deferred until the custom domain
-  was fully verified, which it now is.
+  key). **Live as of Sept 2026** — every push to `main` now rebuilds
+  the Docker image and redeploys to Cloud Run automatically, no manual
+  step. Real behavior change worth knowing: unlike the old Streamlit
+  Cloud flow (which sometimes needed a manual "Reboot" to reliably pick
+  up a push), a push to `main` here goes live immediately with no
+  review pause — there's no staging branch in front of it.
 
 - **Framework: Streamlit.** Confirmed the right call in practice — one
   Python codebase, no separate API layer, fast to iterate.

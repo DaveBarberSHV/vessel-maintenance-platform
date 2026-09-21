@@ -3,7 +3,7 @@
 Things we've deliberately deferred so v1 doesn't stall. Each entry: what it is,
 why it's deferred, and what would trigger picking it up.
 
-## 🚧 IN PROGRESS — Migrating from Streamlit Cloud to Google Cloud Run + custom domain (Sept 2026)
+## ✅ RESOLVED — Migrated from Streamlit Cloud to Google Cloud Run + custom domain (Sept 2026)
 
 **What:** Moving the deployed app off Streamlit Cloud onto Google Cloud
 Run, served at `polaris.fathomvessel.com` (registered via GoDaddy),
@@ -89,10 +89,19 @@ progress:**
 - **`polaris.fathomvessel.com` is now live** — Google's SSL certificate
   finished provisioning well inside the normal 24-48 hour window
   (confirmed via real request logs showing 200s on the custom domain).
-- Not yet done: `setup_workload_identity.sh` + confirming the
-  `.github/workflows/deploy.yml` auto-deploy actually works — deferred
-  until the custom domain is fully verified end-to-end, per the original
-  plan's Phase 5 ordering.
+- Ran `setup_workload_identity.sh` — created a dedicated
+  `github-deployer@project-dbe3feed-c30f-4b89-a65.iam.gserviceaccount.com`
+  service account, a Workload Identity Pool + OIDC provider restricted
+  to this exact repo (`DaveBarberSHV/vessel-maintenance-platform` —
+  no other repo can use it), and granted that service account
+  `run.admin`, `artifactregistry.writer`, `iam.serviceAccountUser`, and
+  `secretmanager.secretAccessor` at the project level so it can deploy
+  and attach the `fathom-polaris-run` runtime SA to new revisions.
+  `WIF_PROVIDER`/`WIF_SERVICE_ACCOUNT` added as GitHub repo secrets
+  (resource identifiers, not credential values — safe to store as
+  plain repo secrets). **CI/CD auto-deploy is now live**: every push to
+  `main` rebuilds the Docker image and redeploys to Cloud Run
+  automatically via `.github/workflows/deploy.yml`, no manual step.
 
 **Update (Sept 21 2026) — Secret Manager IAM hardened, dedicated
 runtime service account:**
@@ -134,9 +143,13 @@ runtime service account:**
   default Admin Activity logs — ties into the existing "Security audit
   log — 30-day commitment" item.
 
-**Streamlit Cloud is untouched and stays live in parallel** until Dave
-has verified `polaris.fathomvessel.com` end-to-end — retiring it is a
-separate, later, non-automated step.
+**Streamlit Cloud has been retired.** Dave ran it in parallel, untouched,
+until he'd verified `polaris.fathomvessel.com` end-to-end, then deleted
+the Streamlit Cloud app entirely — which also removed Streamlit's own
+separate copy of the 3 secrets from their servers, one less place those
+values live. Migration complete: Cloud Run + custom domain is now the
+only deployment, with a dedicated per-app service account and
+automatic deploy on every push to `main`.
 
 ## ✅ RESOLVED — Conversation context bleeding into an unrelated topic change (Sept 2026)
 
