@@ -43,6 +43,27 @@ for role in roles/run.admin roles/artifactregistry.writer roles/iam.serviceAccou
     --condition=None >/dev/null
 done
 
+# cloudbuild.builds.editor above is NOT enough on its own -- gcloud
+# builds submit separately uploads your source to an auto-created GCS
+# bucket ("${PROJECT_ID}_cloudbuild"), and that upload is a plain
+# Storage operation, checked against Storage IAM, not any Cloud Build
+# role. Found this the hard way too (Sept 2026, second real CI/CD
+# failure): "The user is forbidden from accessing the bucket
+# [${PROJECT_ID}_cloudbuild]". Scoped to just this one bucket, not
+# project-wide Storage access, to keep this minimal.
+CLOUDBUILD_BUCKET="gs://${PROJECT_ID}_cloudbuild"
+if gcloud storage buckets describe "$CLOUDBUILD_BUCKET" >/dev/null 2>&1; then
+  gcloud storage buckets add-iam-policy-binding "$CLOUDBUILD_BUCKET" \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="roles/storage.objectAdmin" >/dev/null
+else
+  echo "NOTE: ${CLOUDBUILD_BUCKET} doesn't exist yet (it's created by the" >&2
+  echo "first-ever 'gcloud builds submit' in this project, e.g. via" >&2
+  echo "setup_cloud_run.sh). Re-run this script after that's happened at" >&2
+  echo "least once, or the CI/CD build step will fail with a Storage" >&2
+  echo "permission error." >&2
+fi
+
 echo "==> Creating Workload Identity Pool (if it doesn't exist)..."
 gcloud iam workload-identity-pools describe "$POOL_NAME" --location=global >/dev/null 2>&1 || \
   gcloud iam workload-identity-pools create "$POOL_NAME" \
