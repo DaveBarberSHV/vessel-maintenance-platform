@@ -109,6 +109,44 @@ python3.14 diagnose_retrieval.py "your question here"
 
 ---
 
+## Credential locations — where to update on rotation
+
+**Local (single source of truth):** `~/.streamlit/secrets.toml` (home
+directory — NOT this repo's own `.streamlit/secrets.toml`, which is an
+unused leftover from before the Cloud Run migration). Update the key
+there. `~/.fathom_env` is a pure loader with no values of its own — it
+reads `~/.streamlit/secrets.toml` fresh every time it's sourced, so it
+can't go stale on its own.
+
+`~/.zshrc` sources `~/.fathom_env` automatically on every new shell
+(Sept 22 2026), so a rotated key is picked up by any new terminal or
+Claude Code session with no manual step. Never add the literal
+`export VAR="value"` lines themselves to `~/.zshrc` — only the one
+`source ~/.fathom_env` line belongs there. A hardcoded copy is a second
+credential store that can drift out of sync with
+`~/.streamlit/secrets.toml`, which has already caused a real silent
+failure once (see `docs/working_with_dave.md` "Credential handling").
+
+**Live app (Cloud Run):** only 3 of the 5 keys are needed there —
+`VOYAGE_API_KEY`, `ANTHROPIC_API_KEY`, `SUPABASE_DB_URL` — stored in
+Google Secret Manager, not as plain Cloud Run env vars.
+`SUPABASE_URL` / `SUPABASE_SERVICE_KEY` are local-only (ingestion's
+Storage uploads). To rotate a live-app key: update
+`~/.streamlit/secrets.toml`, `source ~/.fathom_env`, then re-run
+`deploy/setup_cloud_run.sh` — it's idempotent (adds a new secret
+version if the secret already exists) and redeploys so the new
+revision picks it up.
+
+**GitHub Actions secrets are unrelated to this.** The only secrets
+there (`WIF_PROVIDER`, `WIF_SERVICE_ACCOUNT`) authenticate the deploy
+pipeline to GCP; they have nothing to do with the app's API keys and
+don't need touching when the app's keys rotate.
+
+After any rotation, verify with `python3.14 list_engineer_notes.py`
+(local) and by opening polaris.fathomvessel.com (live).
+
+---
+
 ## Architecture in one paragraph
 
 Engineers access via browser → Streamlit app → backend queries Supabase

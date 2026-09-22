@@ -142,6 +142,41 @@ window after Claude Code already launched, doesn't reach an
 already-running session. The session has to be (re)started *after*
 `~/.fathom_env` is sourced for this to work.
 
+**Update, Sept 22 2026 — step 3 is now automatic.** `~/.zshrc` sources
+`~/.fathom_env` itself on every new shell, so Dave no longer has to
+remember to run `source ~/.fathom_env` before starting Claude Code —
+every new terminal and every new Claude Code session already has the
+credentials. This does **not** reintroduce the drift problem from the
+section above: `~/.zshrc` contains only the one `source ~/.fathom_env`
+line, no hardcoded values — `~/.streamlit/secrets.toml` stays the only
+file a real value is ever typed into.
+
+**To be clear, this whole section is about Claude Code, not Claude
+Chat.** The "old pattern" referenced above was written for Claude Chat
+(no direct shell access, so Dave had to paste terminal output back for
+Claude to "see" a command ran). Claude Code is the opposite case — it
+runs commands directly in Dave's real environment, which is exactly why
+the transcript-leak risk is real here and the guard stays in place even
+though loading is now automatic. This project's entire development
+workflow (all edits, commits, and anything touching the repo) happens
+through Claude Code, so this section governs the normal case, not an
+edge case.
+
+**What this section doesn't cover — the live app.** Everything above is
+about credentials in Dave's local shell / Claude Code sessions. The
+deployed app at polaris.fathomvessel.com reads its 3 keys
+(`VOYAGE_API_KEY`, `ANTHROPIC_API_KEY`, `SUPABASE_DB_URL`) from Google
+Secret Manager, set up by `deploy/setup_cloud_run.sh` — a completely
+separate store from `~/.streamlit/secrets.toml`. Rotating a key locally
+does **not** update the live app; re-run `deploy/setup_cloud_run.sh`
+(after updating `~/.streamlit/secrets.toml` and sourcing
+`~/.fathom_env`) to push the new value there too and redeploy.
+
+GitHub Actions secrets (`WIF_PROVIDER`, `WIF_SERVICE_ACCOUNT`) are a
+separate, unrelated pair — they authenticate the CI/CD deploy pipeline
+to GCP and aren't part of the app's credential story at all. Don't tell
+Dave to update a GitHub Actions secret when an API key rotates.
+
 ## General working pattern that's worked well
 
 1. Build/fix something, test it as thoroughly as possible in sandbox

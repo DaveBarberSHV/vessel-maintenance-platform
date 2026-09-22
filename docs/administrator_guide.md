@@ -296,4 +296,44 @@ Each pass should:
 - Add any new real findings from the quarter (the same way the RLS and
   SSL incidents got folded in as real evidence this time).
 
+## 11. Key rotation — where to update credentials
 
+When any API key or database credential needs to be rotated, there are
+exactly two real places to update — not three, and GitHub Actions isn't
+one of them.
+
+**1. Local machine — the single source of truth**
+Update the key in `~/.streamlit/secrets.toml` (the *home-directory*
+one — not this repo's own `.streamlit/secrets.toml`, which is an unused
+leftover from before the Cloud Run migration and doesn't need
+touching). `~/.zshrc` sources `~/.fathom_env` automatically on every
+new shell (Sept 22 2026), so any new terminal or Claude Code session
+picks up the change with no manual step. Never add the literal
+`export VAR="value"` lines themselves to `~/.zshrc` — only the one
+`source ~/.fathom_env` line belongs there; see
+`docs/working_with_dave.md` "Credential handling" for why: a hardcoded
+copy is a second credential store that can drift out of sync with
+`~/.streamlit/secrets.toml`, which has already caused a real silent
+failure once (missing `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` disabled
+page-image uploads without an obvious error).
+
+**2. Google Cloud Secret Manager — the live app**
+Only 3 of the 5 keys live here: `VOYAGE_API_KEY`, `ANTHROPIC_API_KEY`,
+`SUPABASE_DB_URL`. (`SUPABASE_URL` / `SUPABASE_SERVICE_KEY` are
+local-only, used by ingestion's Storage uploads — the live app never
+needs them.) After updating step 1 above, re-run:
+```
+./deploy/setup_cloud_run.sh
+```
+It's idempotent — it adds a new secret version if the secret already
+exists, and redeploys so the new revision actually picks up the
+change.
+
+**GitHub Actions is not a credential store for this app.** The only
+secrets there (`WIF_PROVIDER`, `WIF_SERVICE_ACCOUNT`) authenticate the
+deploy pipeline to GCP itself — they're unrelated to the app's API keys
+and never need updating when a key rotates.
+
+**After any rotation, verify:**
+- Locally: `python3.14 list_engineer_notes.py`
+- Live: open polaris.fathomvessel.com and run a query
